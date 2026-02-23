@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package vlt
 
 import (
 	"os"
@@ -13,7 +13,7 @@ import (
 func TestLockVaultExclusive(t *testing.T) {
 	dir := t.TempDir()
 
-	unlock, err := lockVault(dir, true)
+	unlock, err := LockVault(dir, true)
 	if err != nil {
 		t.Fatalf("first exclusive lock: %v", err)
 	}
@@ -21,7 +21,7 @@ func TestLockVaultExclusive(t *testing.T) {
 
 	// Try a non-blocking exclusive lock on the same file from this process.
 	// It should fail with EWOULDBLOCK because we already hold the lock.
-	p := filepath.Join(dir, lockFileName)
+	p := filepath.Join(dir, LockFileName)
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		t.Fatalf("open lock file: %v", err)
@@ -37,13 +37,13 @@ func TestLockVaultExclusive(t *testing.T) {
 func TestLockVaultSharedCompatible(t *testing.T) {
 	dir := t.TempDir()
 
-	unlock1, err := lockVault(dir, false)
+	unlock1, err := LockVault(dir, false)
 	if err != nil {
 		t.Fatalf("first shared lock: %v", err)
 	}
 	defer unlock1()
 
-	unlock2, err := lockVault(dir, false)
+	unlock2, err := LockVault(dir, false)
 	if err != nil {
 		t.Fatalf("second shared lock: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestLockVaultSharedCompatible(t *testing.T) {
 func TestLockVaultUnlockReleases(t *testing.T) {
 	dir := t.TempDir()
 
-	unlock, err := lockVault(dir, true)
+	unlock, err := LockVault(dir, true)
 	if err != nil {
 		t.Fatalf("acquire lock: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestLockVaultUnlockReleases(t *testing.T) {
 	// Should succeed immediately since the lock was released.
 	done := make(chan error, 1)
 	go func() {
-		u, err := lockVault(dir, true)
+		u, err := LockVault(dir, true)
 		if err == nil {
 			u()
 		}
@@ -81,13 +81,13 @@ func TestLockVaultUnlockReleases(t *testing.T) {
 
 func TestLockVaultCreatesLockFile(t *testing.T) {
 	dir := t.TempDir()
-	p := filepath.Join(dir, lockFileName)
+	p := filepath.Join(dir, LockFileName)
 
 	if _, err := os.Stat(p); err == nil {
 		t.Fatal("lock file should not exist before lockVault")
 	}
 
-	unlock, err := lockVault(dir, true)
+	unlock, err := LockVault(dir, true)
 	if err != nil {
 		t.Fatalf("lockVault: %v", err)
 	}
@@ -105,8 +105,8 @@ func TestIsWriteCommand(t *testing.T) {
 		"daily", "templates:apply", "bookmarks:add", "bookmarks:remove",
 	}
 	for _, cmd := range writes {
-		if !isWriteCommand(cmd) {
-			t.Errorf("isWriteCommand(%q) = false, want true", cmd)
+		if !IsWriteCommand(cmd) {
+			t.Errorf("IsWriteCommand(%q) = false, want true", cmd)
 		}
 	}
 
@@ -116,8 +116,8 @@ func TestIsWriteCommand(t *testing.T) {
 		"tasks", "templates", "bookmarks", "uri",
 	}
 	for _, cmd := range reads {
-		if isWriteCommand(cmd) {
-			t.Errorf("isWriteCommand(%q) = true, want false", cmd)
+		if IsWriteCommand(cmd) {
+			t.Errorf("IsWriteCommand(%q) = true, want false", cmd)
 		}
 	}
 }

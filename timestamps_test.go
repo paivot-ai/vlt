@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"os"
@@ -18,12 +18,12 @@ func TestEnsureTimestampsCreate(t *testing.T) {
 	now := time.Now().UTC()
 	got := ensureTimestamps(text, true, now)
 
-	yaml, _, hasFM := extractFrontmatter(got)
+	yaml, _, hasFM := ExtractFrontmatter(got)
 	if !hasFM {
 		t.Fatal("frontmatter lost")
 	}
 
-	createdAt, ok := frontmatterGetValue(yaml, "created_at")
+	createdAt, ok := FrontmatterGetValue(yaml, "created_at")
 	if !ok {
 		t.Fatal("created_at not set on create")
 	}
@@ -31,7 +31,7 @@ func TestEnsureTimestampsCreate(t *testing.T) {
 		t.Fatal("created_at is empty")
 	}
 
-	updatedAt, ok := frontmatterGetValue(yaml, "updated_at")
+	updatedAt, ok := FrontmatterGetValue(yaml, "updated_at")
 	if !ok {
 		t.Fatal("updated_at not set on create")
 	}
@@ -46,12 +46,12 @@ func TestEnsureTimestampsUpdate(t *testing.T) {
 	now := time.Now().UTC()
 	got := ensureTimestamps(text, false, now)
 
-	yaml, _, hasFM := extractFrontmatter(got)
+	yaml, _, hasFM := ExtractFrontmatter(got)
 	if !hasFM {
 		t.Fatal("frontmatter lost")
 	}
 
-	createdAt, ok := frontmatterGetValue(yaml, "created_at")
+	createdAt, ok := FrontmatterGetValue(yaml, "created_at")
 	if !ok {
 		t.Fatal("created_at missing after update")
 	}
@@ -59,7 +59,7 @@ func TestEnsureTimestampsUpdate(t *testing.T) {
 		t.Errorf("created_at changed: got %q, want 2026-01-01T00:00:00Z", createdAt)
 	}
 
-	updatedAt, ok := frontmatterGetValue(yaml, "updated_at")
+	updatedAt, ok := FrontmatterGetValue(yaml, "updated_at")
 	if !ok {
 		t.Fatal("updated_at not set on update")
 	}
@@ -74,8 +74,8 @@ func TestEnsureTimestampsPreservesCreatedAt(t *testing.T) {
 	now := time.Now().UTC()
 	got := ensureTimestamps(text, true, now)
 
-	yaml, _, _ := extractFrontmatter(got)
-	createdAt, ok := frontmatterGetValue(yaml, "created_at")
+	yaml, _, _ := ExtractFrontmatter(got)
+	createdAt, ok := FrontmatterGetValue(yaml, "created_at")
 	if !ok {
 		t.Fatal("created_at missing")
 	}
@@ -90,12 +90,12 @@ func TestEnsureTimestampsNoFrontmatter(t *testing.T) {
 	now := time.Now().UTC()
 	got := ensureTimestamps(text, true, now)
 
-	yaml, _, hasFM := extractFrontmatter(got)
+	yaml, _, hasFM := ExtractFrontmatter(got)
 	if !hasFM {
 		t.Fatal("frontmatter not created for note without frontmatter")
 	}
 
-	createdAt, ok := frontmatterGetValue(yaml, "created_at")
+	createdAt, ok := FrontmatterGetValue(yaml, "created_at")
 	if !ok {
 		t.Fatal("created_at not set when frontmatter was added")
 	}
@@ -103,7 +103,7 @@ func TestEnsureTimestampsNoFrontmatter(t *testing.T) {
 		t.Fatal("created_at is empty")
 	}
 
-	updatedAt, ok := frontmatterGetValue(yaml, "updated_at")
+	updatedAt, ok := FrontmatterGetValue(yaml, "updated_at")
 	if !ok {
 		t.Fatal("updated_at not set when frontmatter was added")
 	}
@@ -123,15 +123,15 @@ func TestEnsureTimestampsFormat(t *testing.T) {
 	now := time.Date(2026, 2, 19, 14, 30, 0, 0, time.UTC)
 	got := ensureTimestamps(text, true, now)
 
-	yaml, _, _ := extractFrontmatter(got)
+	yaml, _, _ := ExtractFrontmatter(got)
 
-	createdAt, _ := frontmatterGetValue(yaml, "created_at")
+	createdAt, _ := FrontmatterGetValue(yaml, "created_at")
 	want := "2026-02-19T14:30:00Z"
 	if createdAt != want {
 		t.Errorf("created_at format: got %q, want %q", createdAt, want)
 	}
 
-	updatedAt, _ := frontmatterGetValue(yaml, "updated_at")
+	updatedAt, _ := FrontmatterGetValue(yaml, "updated_at")
 	if updatedAt != want {
 		t.Errorf("updated_at format: got %q, want %q", updatedAt, want)
 	}
@@ -145,12 +145,8 @@ func TestEnsureTimestampsFormat(t *testing.T) {
 func TestCreateWithTimestamps(t *testing.T) {
 	vaultDir := t.TempDir()
 
-	params := map[string]string{
-		"name":    "Stamped Note",
-		"path":    "Stamped Note.md",
-		"content": "---\ntype: note\n---\n\n# Stamped\n",
-	}
-	if err := cmdCreate(vaultDir, params, true, true); err != nil {
+	v := &Vault{dir: vaultDir}
+	if err := v.Create("Stamped Note", "Stamped Note.md", "---\ntype: note\n---\n\n# Stamped\n", true, true); err != nil {
 		t.Fatalf("create with timestamps: %v", err)
 	}
 
@@ -160,20 +156,20 @@ func TestCreateWithTimestamps(t *testing.T) {
 	}
 	got := string(data)
 
-	yaml, _, hasFM := extractFrontmatter(got)
+	yaml, _, hasFM := ExtractFrontmatter(got)
 	if !hasFM {
 		t.Fatal("no frontmatter")
 	}
 
-	if _, ok := frontmatterGetValue(yaml, "created_at"); !ok {
+	if _, ok := FrontmatterGetValue(yaml, "created_at"); !ok {
 		t.Error("created_at not set on create with timestamps")
 	}
-	if _, ok := frontmatterGetValue(yaml, "updated_at"); !ok {
+	if _, ok := FrontmatterGetValue(yaml, "updated_at"); !ok {
 		t.Error("updated_at not set on create with timestamps")
 	}
 
 	// Original property preserved
-	if v, ok := frontmatterGetValue(yaml, "type"); !ok || v != "note" {
+	if v, ok := FrontmatterGetValue(yaml, "type"); !ok || v != "note" {
 		t.Errorf("type property: got %q", v)
 	}
 }
@@ -186,21 +182,18 @@ func TestAppendWithTimestamps(t *testing.T) {
 	notePath := filepath.Join(vaultDir, "AppendNote.md")
 	os.WriteFile(notePath, []byte(original), 0644)
 
-	params := map[string]string{
-		"file":    "AppendNote",
-		"content": "\nAppended content.\n",
-	}
-	if err := cmdAppend(vaultDir, params, true); err != nil {
+	v := &Vault{dir: vaultDir}
+	if err := v.Append("AppendNote", "\nAppended content.\n", true); err != nil {
 		t.Fatalf("append with timestamps: %v", err)
 	}
 
 	data, _ := os.ReadFile(notePath)
 	got := string(data)
 
-	yaml, _, _ := extractFrontmatter(got)
+	yaml, _, _ := ExtractFrontmatter(got)
 
 	// created_at must be unchanged
-	createdAt, ok := frontmatterGetValue(yaml, "created_at")
+	createdAt, ok := FrontmatterGetValue(yaml, "created_at")
 	if !ok {
 		t.Fatal("created_at missing after append")
 	}
@@ -209,7 +202,7 @@ func TestAppendWithTimestamps(t *testing.T) {
 	}
 
 	// updated_at must be refreshed
-	updatedAt, ok := frontmatterGetValue(yaml, "updated_at")
+	updatedAt, ok := FrontmatterGetValue(yaml, "updated_at")
 	if !ok {
 		t.Fatal("updated_at not set after append")
 	}
@@ -231,20 +224,17 @@ func TestPrependWithTimestamps(t *testing.T) {
 	notePath := filepath.Join(vaultDir, "PrependNote.md")
 	os.WriteFile(notePath, []byte(original), 0644)
 
-	params := map[string]string{
-		"file":    "PrependNote",
-		"content": "Prepended line\n",
-	}
-	if err := cmdPrepend(vaultDir, params, true); err != nil {
+	v := &Vault{dir: vaultDir}
+	if err := v.Prepend("PrependNote", "Prepended line\n", true); err != nil {
 		t.Fatalf("prepend with timestamps: %v", err)
 	}
 
 	data, _ := os.ReadFile(notePath)
 	got := string(data)
 
-	yaml, _, _ := extractFrontmatter(got)
+	yaml, _, _ := ExtractFrontmatter(got)
 
-	updatedAt, ok := frontmatterGetValue(yaml, "updated_at")
+	updatedAt, ok := FrontmatterGetValue(yaml, "updated_at")
 	if !ok {
 		t.Fatal("updated_at not set after prepend")
 	}
@@ -253,7 +243,7 @@ func TestPrependWithTimestamps(t *testing.T) {
 	}
 
 	// created_at preserved
-	createdAt, _ := frontmatterGetValue(yaml, "created_at")
+	createdAt, _ := FrontmatterGetValue(yaml, "created_at")
 	if createdAt != "2026-01-01T00:00:00Z" {
 		t.Errorf("created_at changed: got %q", createdAt)
 	}
@@ -272,21 +262,18 @@ func TestWriteWithTimestamps(t *testing.T) {
 	notePath := filepath.Join(vaultDir, "WriteNote.md")
 	os.WriteFile(notePath, []byte(original), 0644)
 
-	params := map[string]string{
-		"file":    "WriteNote",
-		"content": "# New Body\n\nReplaced.\n",
-	}
-	if err := cmdWrite(vaultDir, params, true); err != nil {
+	v := &Vault{dir: vaultDir}
+	if err := v.Write("WriteNote", "# New Body\n\nReplaced.\n", true); err != nil {
 		t.Fatalf("write with timestamps: %v", err)
 	}
 
 	data, _ := os.ReadFile(notePath)
 	got := string(data)
 
-	yaml, _, _ := extractFrontmatter(got)
+	yaml, _, _ := ExtractFrontmatter(got)
 
 	// created_at must be unchanged
-	createdAt, ok := frontmatterGetValue(yaml, "created_at")
+	createdAt, ok := FrontmatterGetValue(yaml, "created_at")
 	if !ok {
 		t.Fatal("created_at missing after write")
 	}
@@ -295,7 +282,7 @@ func TestWriteWithTimestamps(t *testing.T) {
 	}
 
 	// updated_at must be refreshed
-	updatedAt, ok := frontmatterGetValue(yaml, "updated_at")
+	updatedAt, ok := FrontmatterGetValue(yaml, "updated_at")
 	if !ok {
 		t.Fatal("updated_at not set after write")
 	}
@@ -321,22 +308,18 @@ func TestPatchWithTimestamps(t *testing.T) {
 	notePath := filepath.Join(vaultDir, "PatchNote.md")
 	os.WriteFile(notePath, []byte(original), 0644)
 
-	params := map[string]string{
-		"file":    "PatchNote",
-		"heading": "## Section A",
-		"content": "new content\n",
-	}
-	if err := cmdPatch(vaultDir, params, false, true); err != nil {
+	v := &Vault{dir: vaultDir}
+	if err := v.Patch("PatchNote", PatchOptions{Heading: "## Section A", Content: "new content\n", Timestamps: true}); err != nil {
 		t.Fatalf("patch with timestamps: %v", err)
 	}
 
 	data, _ := os.ReadFile(notePath)
 	got := string(data)
 
-	yaml, _, _ := extractFrontmatter(got)
+	yaml, _, _ := ExtractFrontmatter(got)
 
 	// created_at must be unchanged
-	createdAt, ok := frontmatterGetValue(yaml, "created_at")
+	createdAt, ok := FrontmatterGetValue(yaml, "created_at")
 	if !ok {
 		t.Fatal("created_at missing after patch")
 	}
@@ -345,7 +328,7 @@ func TestPatchWithTimestamps(t *testing.T) {
 	}
 
 	// updated_at must be refreshed
-	updatedAt, ok := frontmatterGetValue(yaml, "updated_at")
+	updatedAt, ok := FrontmatterGetValue(yaml, "updated_at")
 	if !ok {
 		t.Fatal("updated_at not set after patch")
 	}
@@ -369,13 +352,9 @@ func TestTimestampsEnvVar(t *testing.T) {
 
 	t.Setenv("VLT_TIMESTAMPS", "1")
 
-	params := map[string]string{
-		"name":    "EnvNote",
-		"path":    "EnvNote.md",
-		"content": "---\ntype: test\n---\n\n# Env Test\n",
-	}
 	// timestamps=false (flag not set), but env var is set
-	if err := cmdCreate(vaultDir, params, true, false); err != nil {
+	v := &Vault{dir: vaultDir}
+	if err := v.Create("EnvNote", "EnvNote.md", "---\ntype: test\n---\n\n# Env Test\n", true, false); err != nil {
 		t.Fatalf("create with env var: %v", err)
 	}
 
@@ -385,15 +364,15 @@ func TestTimestampsEnvVar(t *testing.T) {
 	}
 	got := string(data)
 
-	yaml, _, hasFM := extractFrontmatter(got)
+	yaml, _, hasFM := ExtractFrontmatter(got)
 	if !hasFM {
 		t.Fatal("no frontmatter")
 	}
 
-	if _, ok := frontmatterGetValue(yaml, "created_at"); !ok {
+	if _, ok := FrontmatterGetValue(yaml, "created_at"); !ok {
 		t.Error("created_at not set via VLT_TIMESTAMPS env var")
 	}
-	if _, ok := frontmatterGetValue(yaml, "updated_at"); !ok {
+	if _, ok := FrontmatterGetValue(yaml, "updated_at"); !ok {
 		t.Error("updated_at not set via VLT_TIMESTAMPS env var")
 	}
 }
@@ -406,40 +385,32 @@ func TestNoTimestampsWithoutFlag(t *testing.T) {
 	t.Setenv("VLT_TIMESTAMPS", "")
 
 	// Create
-	params := map[string]string{
-		"name":    "PlainNote",
-		"path":    "PlainNote.md",
-		"content": "---\ntype: note\n---\n\n# Plain\n",
-	}
-	if err := cmdCreate(vaultDir, params, true, false); err != nil {
+	v := &Vault{dir: vaultDir}
+	if err := v.Create("PlainNote", "PlainNote.md", "---\ntype: note\n---\n\n# Plain\n", true, false); err != nil {
 		t.Fatalf("create without timestamps: %v", err)
 	}
 
 	data, _ := os.ReadFile(filepath.Join(vaultDir, "PlainNote.md"))
 	got := string(data)
 
-	yaml, _, _ := extractFrontmatter(got)
-	if _, ok := frontmatterGetValue(yaml, "created_at"); ok {
+	yaml, _, _ := ExtractFrontmatter(got)
+	if _, ok := FrontmatterGetValue(yaml, "created_at"); ok {
 		t.Error("created_at should NOT be set without timestamps flag")
 	}
-	if _, ok := frontmatterGetValue(yaml, "updated_at"); ok {
+	if _, ok := FrontmatterGetValue(yaml, "updated_at"); ok {
 		t.Error("updated_at should NOT be set without timestamps flag")
 	}
 
 	// Append
-	appendParams := map[string]string{
-		"file":    "PlainNote",
-		"content": "\nMore content.\n",
-	}
-	if err := cmdAppend(vaultDir, appendParams, false); err != nil {
+	if err := v.Append("PlainNote", "\nMore content.\n", false); err != nil {
 		t.Fatalf("append without timestamps: %v", err)
 	}
 
 	data, _ = os.ReadFile(filepath.Join(vaultDir, "PlainNote.md"))
 	got = string(data)
 
-	yaml, _, _ = extractFrontmatter(got)
-	if _, ok := frontmatterGetValue(yaml, "updated_at"); ok {
+	yaml, _, _ = ExtractFrontmatter(got)
+	if _, ok := FrontmatterGetValue(yaml, "updated_at"); ok {
 		t.Error("updated_at should NOT be set without timestamps flag on append")
 	}
 }
@@ -448,44 +419,40 @@ func TestNoTimestampsWithoutFlag(t *testing.T) {
 func TestTimestampsPreserveExistingFrontmatter(t *testing.T) {
 	vaultDir := t.TempDir()
 
-	params := map[string]string{
-		"name":    "RichNote",
-		"path":    "RichNote.md",
-		"content": "---\ntype: decision\nstatus: active\naliases: [Dec1, Alt]\ntags: [project, review]\n---\n\n# Rich Note\n",
-	}
-	if err := cmdCreate(vaultDir, params, true, true); err != nil {
+	v := &Vault{dir: vaultDir}
+	if err := v.Create("RichNote", "RichNote.md", "---\ntype: decision\nstatus: active\naliases: [Dec1, Alt]\ntags: [project, review]\n---\n\n# Rich Note\n", true, true); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	data, _ := os.ReadFile(filepath.Join(vaultDir, "RichNote.md"))
 	got := string(data)
 
-	yaml, _, hasFM := extractFrontmatter(got)
+	yaml, _, hasFM := ExtractFrontmatter(got)
 	if !hasFM {
 		t.Fatal("no frontmatter")
 	}
 
 	// All original properties must be intact
-	if v, ok := frontmatterGetValue(yaml, "type"); !ok || v != "decision" {
+	if v, ok := FrontmatterGetValue(yaml, "type"); !ok || v != "decision" {
 		t.Errorf("type lost or changed: %q", v)
 	}
-	if v, ok := frontmatterGetValue(yaml, "status"); !ok || v != "active" {
+	if v, ok := FrontmatterGetValue(yaml, "status"); !ok || v != "active" {
 		t.Errorf("status lost or changed: %q", v)
 	}
-	aliases := frontmatterGetList(yaml, "aliases")
+	aliases := FrontmatterGetList(yaml, "aliases")
 	if len(aliases) != 2 || aliases[0] != "Dec1" || aliases[1] != "Alt" {
 		t.Errorf("aliases changed: %v", aliases)
 	}
-	tags := frontmatterGetList(yaml, "tags")
+	tags := FrontmatterGetList(yaml, "tags")
 	if len(tags) != 2 || tags[0] != "project" || tags[1] != "review" {
 		t.Errorf("tags changed: %v", tags)
 	}
 
 	// Timestamps must be present
-	if _, ok := frontmatterGetValue(yaml, "created_at"); !ok {
+	if _, ok := FrontmatterGetValue(yaml, "created_at"); !ok {
 		t.Error("created_at not added")
 	}
-	if _, ok := frontmatterGetValue(yaml, "updated_at"); !ok {
+	if _, ok := FrontmatterGetValue(yaml, "updated_at"); !ok {
 		t.Error("updated_at not added")
 	}
 }
@@ -499,22 +466,18 @@ func TestPatchByLineWithTimestamps(t *testing.T) {
 	os.WriteFile(notePath, []byte(original), 0644)
 
 	// Line 7 is "Line A" (1=---, 2=type:, 3=created_at:, 4=updated_at:, 5=---, 6=empty, 7=Line A)
-	params := map[string]string{
-		"file":    "LineNote",
-		"line":    "7",
-		"content": "PATCHED",
-	}
-	if err := cmdPatch(vaultDir, params, false, true); err != nil {
+	v := &Vault{dir: vaultDir}
+	if err := v.Patch("LineNote", PatchOptions{LineSpec: "7", Content: "PATCHED", Timestamps: true}); err != nil {
 		t.Fatalf("patch by line with timestamps: %v", err)
 	}
 
 	data, _ := os.ReadFile(notePath)
 	got := string(data)
 
-	yaml, _, _ := extractFrontmatter(got)
+	yaml, _, _ := ExtractFrontmatter(got)
 
 	// created_at must be unchanged
-	createdAt, ok := frontmatterGetValue(yaml, "created_at")
+	createdAt, ok := FrontmatterGetValue(yaml, "created_at")
 	if !ok {
 		t.Fatal("created_at missing after line patch")
 	}
@@ -523,7 +486,7 @@ func TestPatchByLineWithTimestamps(t *testing.T) {
 	}
 
 	// updated_at must be refreshed
-	updatedAt, ok := frontmatterGetValue(yaml, "updated_at")
+	updatedAt, ok := FrontmatterGetValue(yaml, "updated_at")
 	if !ok {
 		t.Fatal("updated_at not set after line patch")
 	}

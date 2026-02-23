@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"os"
@@ -12,19 +12,19 @@ func TestParseWikilinks(t *testing.T) {
 	tests := []struct {
 		name  string
 		text  string
-		wants []wikilink
+		wants []Wikilink
 	}{
 		{
 			name: "simple link",
 			text: "See [[Session Operating Mode]] for details.",
-			wants: []wikilink{
+			wants: []Wikilink{
 				{Title: "Session Operating Mode", Raw: "[[Session Operating Mode]]"},
 			},
 		},
 		{
 			name: "link with heading",
 			text: "See [[Agent Execution Model#Ephemeral Agents]] here.",
-			wants: []wikilink{
+			wants: []Wikilink{
 				{Title: "Agent Execution Model", Heading: "Ephemeral Agents",
 					Raw: "[[Agent Execution Model#Ephemeral Agents]]"},
 			},
@@ -32,14 +32,14 @@ func TestParseWikilinks(t *testing.T) {
 		{
 			name: "link with display text",
 			text: "The [[Sr PM Agent|PM]] handles this.",
-			wants: []wikilink{
+			wants: []Wikilink{
 				{Title: "Sr PM Agent", Display: "PM", Raw: "[[Sr PM Agent|PM]]"},
 			},
 		},
 		{
 			name: "link with heading and display",
 			text: "See [[Developer Agent#TDD|testing section]] for more.",
-			wants: []wikilink{
+			wants: []Wikilink{
 				{Title: "Developer Agent", Heading: "TDD", Display: "testing section",
 					Raw: "[[Developer Agent#TDD|testing section]]"},
 			},
@@ -47,7 +47,7 @@ func TestParseWikilinks(t *testing.T) {
 		{
 			name: "multiple links on same line",
 			text: "Both [[Anchor Agent]] and [[Retro Agent]] are ephemeral.",
-			wants: []wikilink{
+			wants: []Wikilink{
 				{Title: "Anchor Agent", Raw: "[[Anchor Agent]]"},
 				{Title: "Retro Agent", Raw: "[[Retro Agent]]"},
 			},
@@ -55,12 +55,12 @@ func TestParseWikilinks(t *testing.T) {
 		{
 			name:  "no links",
 			text:  "Plain text with no links at all.",
-			wants: []wikilink{},
+			wants: []Wikilink{},
 		},
 		{
 			name: "link with special regex chars in title",
 			text: "See [[D&F Sequential (With Alignment)]] for details.",
-			wants: []wikilink{
+			wants: []Wikilink{
 				{Title: "D&F Sequential (With Alignment)",
 					Raw: "[[D&F Sequential (With Alignment)]]"},
 			},
@@ -69,7 +69,7 @@ func TestParseWikilinks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseWikilinks(tt.text)
+			got := ParseWikilinks(tt.text)
 
 			if len(got) != len(tt.wants) {
 				t.Fatalf("got %d links, want %d", len(got), len(tt.wants))
@@ -169,7 +169,7 @@ func TestReplaceWikilinks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := replaceWikilinks(tt.text, tt.oldTitle, tt.newTitle)
+			got := ReplaceWikilinks(tt.text, tt.oldTitle, tt.newTitle)
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
@@ -269,7 +269,7 @@ func TestFindBacklinks(t *testing.T) {
 		0644,
 	)
 
-	results, err := findBacklinks(vaultDir, "Session Operating Mode")
+	results, err := FindBacklinks(vaultDir, "Session Operating Mode")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestFindBacklinks_CaseInsensitive(t *testing.T) {
 		0644,
 	)
 
-	results, err := findBacklinks(vaultDir, "Session Operating Mode")
+	results, err := FindBacklinks(vaultDir, "Session Operating Mode")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -314,33 +314,33 @@ func TestParseWikilinks_BlockReference(t *testing.T) {
 	tests := []struct {
 		name string
 		text string
-		want wikilink
+		want Wikilink
 	}{
 		{
 			name: "simple block ref",
 			text: "See [[Note#^my-id]] here.",
-			want: wikilink{Title: "Note", BlockID: "my-id", Raw: "[[Note#^my-id]]"},
+			want: Wikilink{Title: "Note", BlockID: "my-id", Raw: "[[Note#^my-id]]"},
 		},
 		{
 			name: "block ref with display",
 			text: "See [[Note#^my-id|Custom]] here.",
-			want: wikilink{Title: "Note", BlockID: "my-id", Display: "Custom", Raw: "[[Note#^my-id|Custom]]"},
+			want: Wikilink{Title: "Note", BlockID: "my-id", Display: "Custom", Raw: "[[Note#^my-id|Custom]]"},
 		},
 		{
 			name: "embed block ref",
 			text: "![[Note#^my-id]]",
-			want: wikilink{Title: "Note", BlockID: "my-id", Embed: true, Raw: "![[Note#^my-id]]"},
+			want: Wikilink{Title: "Note", BlockID: "my-id", Embed: true, Raw: "![[Note#^my-id]]"},
 		},
 		{
 			name: "heading is not confused with block",
 			text: "[[Note#Section]]",
-			want: wikilink{Title: "Note", Heading: "Section", Raw: "[[Note#Section]]"},
+			want: Wikilink{Title: "Note", Heading: "Section", Raw: "[[Note#Section]]"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseWikilinks(tt.text)
+			got := ParseWikilinks(tt.text)
 			if len(got) != 1 {
 				t.Fatalf("got %d links, want 1", len(got))
 			}
@@ -393,7 +393,7 @@ func TestReplaceWikilinks_BlockReference(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := replaceWikilinks(tt.text, tt.oldTitle, tt.newTitle)
+			got := ReplaceWikilinks(tt.text, tt.oldTitle, tt.newTitle)
 			if got != tt.want {
 				t.Errorf("got %q, want %q", got, tt.want)
 			}
@@ -410,7 +410,7 @@ func TestFindBacklinks_BlockReference(t *testing.T) {
 		0644,
 	)
 
-	results, err := findBacklinks(vaultDir, "Target Note")
+	results, err := FindBacklinks(vaultDir, "Target Note")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestFindBacklinks_BlockReference(t *testing.T) {
 func TestParseWikilinks_Embeds(t *testing.T) {
 	text := "See ![[Embedded Note]] and ![[Other#Section|alias]] here."
 
-	got := parseWikilinks(text)
+	got := ParseWikilinks(text)
 
 	if len(got) != 2 {
 		t.Fatalf("got %d links, want 2", len(got))
@@ -544,7 +544,7 @@ func TestUpdateVaultMdLinks_NoMatch(t *testing.T) {
 
 func TestReplaceWikilinks_Embeds(t *testing.T) {
 	text := "See ![[Old Note]] and [[Old Note#Heading]] here."
-	got := replaceWikilinks(text, "Old Note", "New Note")
+	got := ReplaceWikilinks(text, "Old Note", "New Note")
 	want := "See ![[New Note]] and [[New Note#Heading]] here."
 
 	if got != want {
@@ -561,7 +561,7 @@ func TestFindBacklinks_IncludesEmbeds(t *testing.T) {
 		0644,
 	)
 
-	results, err := findBacklinks(vaultDir, "Target Note")
+	results, err := FindBacklinks(vaultDir, "Target Note")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

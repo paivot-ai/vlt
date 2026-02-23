@@ -7,10 +7,10 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
 build: ## Build vlt binary
-	go build -o vlt .
+	go build -o vlt ./cmd/vlt
 
 install: ## Install vlt to $GOPATH/bin
-	go install .
+	go install ./cmd/vlt
 
 install-skill: ## Install vlt skill for an AI agent (AGENT=claude|codex|opencode)
 	@case "$(AGENT)" in \

@@ -1,6 +1,6 @@
-package main
+package vlt
 
-// Write commands require an exclusive vault lock; all others use a shared lock.
+// WriteCommands lists CLI commands that require an exclusive vault lock; all others use a shared lock.
 var writeCommands = map[string]bool{
 	"create":           true,
 	"append":           true,
@@ -17,9 +17,10 @@ var writeCommands = map[string]bool{
 	"bookmarks:remove": true,
 }
 
-func isWriteCommand(cmd string) bool {
+// IsWriteCommand returns true if cmd is a write command requiring an exclusive lock.
+func IsWriteCommand(cmd string) bool {
 	return writeCommands[cmd]
 }
 
-// lockFileName is the advisory lock file placed in the vault root.
-const lockFileName = ".vlt.lock"
+// LockFileName is the advisory lock file placed in the vault root.
+const LockFileName = ".vlt.lock"

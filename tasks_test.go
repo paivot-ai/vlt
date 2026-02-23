@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"os"
@@ -16,7 +16,7 @@ func TestParseTasks(t *testing.T) {
 Some random text
 - [ ] Another task
 `
-	tasks := parseTasks(text)
+	tasks := ParseTasks(text)
 
 	if len(tasks) != 5 {
 		t.Fatalf("got %d tasks, want 5", len(tasks))
@@ -44,14 +44,14 @@ Some random text
 }
 
 func TestParseTasks_Empty(t *testing.T) {
-	tasks := parseTasks("# No tasks here\n\nJust text.\n")
+	tasks := ParseTasks("# No tasks here\n\nJust text.\n")
 	if len(tasks) != 0 {
 		t.Errorf("got %d tasks, want 0", len(tasks))
 	}
 }
 
 func TestFilterTasks(t *testing.T) {
-	tasks := []task{
+	tasks := []Task{
 		{Text: "Done task", Done: true},
 		{Text: "Pending task", Done: false},
 		{Text: "Another done", Done: true},
@@ -73,7 +73,7 @@ func TestFilterTasks(t *testing.T) {
 	}
 }
 
-func TestCmdTasks_SingleFile(t *testing.T) {
+func TestTasks_SingleFile(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	os.WriteFile(
@@ -82,14 +82,17 @@ func TestCmdTasks_SingleFile(t *testing.T) {
 		0644,
 	)
 
-	params := map[string]string{"file": "Tasks"}
-	flags := map[string]bool{}
-	if err := cmdTasks(vaultDir, params, flags); err != nil {
-		t.Fatalf("tasks single file: %v", err)
+	v := &Vault{dir: vaultDir}
+	tasks, err := v.Tasks(TaskOptions{File: "Tasks"})
+	if err != nil {
+		t.Fatalf("Tasks single file: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Fatalf("got %d tasks, want 3", len(tasks))
 	}
 }
 
-func TestCmdTasks_VaultWide(t *testing.T) {
+func TestTasks_VaultWide(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	os.MkdirAll(filepath.Join(vaultDir, "projects"), 0755)
@@ -111,14 +114,19 @@ func TestCmdTasks_VaultWide(t *testing.T) {
 		0644,
 	)
 
-	params := map[string]string{}
-	flags := map[string]bool{}
-	if err := cmdTasks(vaultDir, params, flags); err != nil {
-		t.Fatalf("tasks vault-wide: %v", err)
+	v := &Vault{dir: vaultDir}
+	tasks, err := v.Tasks(TaskOptions{})
+	if err != nil {
+		t.Fatalf("Tasks vault-wide: %v", err)
+	}
+
+	// Should find tasks in Daily.md (1) and Plan.md (2), but not .obsidian (1)
+	if len(tasks) != 3 {
+		t.Fatalf("got %d tasks, want 3 (skipping .obsidian)", len(tasks))
 	}
 }
 
-func TestCmdTasks_FilterDone(t *testing.T) {
+func TestTasks_FilterDone(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	os.WriteFile(
@@ -127,14 +135,20 @@ func TestCmdTasks_FilterDone(t *testing.T) {
 		0644,
 	)
 
-	params := map[string]string{"file": "Tasks"}
-	flags := map[string]bool{"done": true}
-	if err := cmdTasks(vaultDir, params, flags); err != nil {
-		t.Fatalf("tasks filter done: %v", err)
+	v := &Vault{dir: vaultDir}
+	tasks, err := v.Tasks(TaskOptions{File: "Tasks", Done: true})
+	if err != nil {
+		t.Fatalf("Tasks filter done: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("got %d tasks, want 1 (done only)", len(tasks))
+	}
+	if !tasks[0].Done {
+		t.Errorf("expected done task, got pending")
 	}
 }
 
-func TestCmdTasks_FilterPending(t *testing.T) {
+func TestTasks_FilterPending(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	os.WriteFile(
@@ -143,14 +157,20 @@ func TestCmdTasks_FilterPending(t *testing.T) {
 		0644,
 	)
 
-	params := map[string]string{"file": "Tasks"}
-	flags := map[string]bool{"pending": true}
-	if err := cmdTasks(vaultDir, params, flags); err != nil {
-		t.Fatalf("tasks filter pending: %v", err)
+	v := &Vault{dir: vaultDir}
+	tasks, err := v.Tasks(TaskOptions{File: "Tasks", Pending: true})
+	if err != nil {
+		t.Fatalf("Tasks filter pending: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("got %d tasks, want 1 (pending only)", len(tasks))
+	}
+	if tasks[0].Done {
+		t.Errorf("expected pending task, got done")
 	}
 }
 
-func TestCmdTasks_PathFilter(t *testing.T) {
+func TestTasks_PathFilter(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	os.MkdirAll(filepath.Join(vaultDir, "projects"), 0755)
@@ -166,35 +186,17 @@ func TestCmdTasks_PathFilter(t *testing.T) {
 		0644,
 	)
 
-	params := map[string]string{"path": "projects"}
-	flags := map[string]bool{}
-	if err := cmdTasks(vaultDir, params, flags); err != nil {
-		t.Fatalf("tasks path filter: %v", err)
+	v := &Vault{dir: vaultDir}
+	tasks, err := v.Tasks(TaskOptions{Path: "projects"})
+	if err != nil {
+		t.Fatalf("Tasks path filter: %v", err)
 	}
-}
 
-func TestCmdTasks_JSONOutput(t *testing.T) {
-	vaultDir := t.TempDir()
-
-	os.WriteFile(
-		filepath.Join(vaultDir, "Tasks.md"),
-		[]byte("- [ ] Buy groceries\n- [x] Review PR\n"),
-		0644,
-	)
-
-	params := map[string]string{"file": "Tasks"}
-	flags := map[string]bool{"--json": true}
-
-	got := captureStdout(func() {
-		if err := cmdTasks(vaultDir, params, flags); err != nil {
-			t.Fatalf("tasks json: %v", err)
-		}
-	})
-
-	if got == "" {
-		t.Fatal("expected json output, got empty")
+	// Should only find the task in projects/
+	if len(tasks) != 1 {
+		t.Fatalf("got %d tasks, want 1 (path filter)", len(tasks))
 	}
-	if got[0] != '[' {
-		t.Errorf("expected json array, got: %q", got[:20])
+	if tasks[0].Text != "Project task" {
+		t.Errorf("task text = %q, want %q", tasks[0].Text, "Project task")
 	}
 }

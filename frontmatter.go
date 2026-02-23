@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"fmt"
@@ -7,9 +7,9 @@ import (
 	"time"
 )
 
-// extractFrontmatter returns the YAML content between --- delimiters,
+// ExtractFrontmatter returns the YAML content between --- delimiters,
 // the line index where the body starts, and whether frontmatter was found.
-func extractFrontmatter(text string) (yaml string, bodyStart int, found bool) {
+func ExtractFrontmatter(text string) (yaml string, bodyStart int, found bool) {
 	lines := strings.Split(text, "\n")
 	if len(lines) < 2 || strings.TrimSpace(lines[0]) != "---" {
 		return "", 0, false
@@ -24,14 +24,14 @@ func extractFrontmatter(text string) (yaml string, bodyStart int, found bool) {
 	return "", 0, false
 }
 
-// frontmatterGetList extracts a list value from frontmatter YAML.
+// FrontmatterGetList extracts a list value from frontmatter YAML.
 // Handles inline format: key: [a, b, c]
 // and block format:
 //
 //	key:
 //	  - a
 //	  - b
-func frontmatterGetList(yaml, key string) []string {
+func FrontmatterGetList(yaml, key string) []string {
 	lines := strings.Split(yaml, "\n")
 	prefix := key + ":"
 
@@ -85,8 +85,8 @@ func frontmatterGetList(yaml, key string) []string {
 	return nil
 }
 
-// frontmatterGetValue extracts a simple string value from frontmatter YAML.
-func frontmatterGetValue(yaml, key string) (string, bool) {
+// FrontmatterGetValue extracts a simple string value from frontmatter YAML.
+func FrontmatterGetValue(yaml, key string) (string, bool) {
 	lines := strings.Split(yaml, "\n")
 	prefix := key + ":"
 
@@ -194,7 +194,7 @@ func timestampsEnabled(flag bool) bool {
 func ensureTimestamps(text string, isCreate bool, now time.Time) string {
 	ts := now.UTC().Format(time.RFC3339)
 
-	_, _, hasFM := extractFrontmatter(text)
+	_, _, hasFM := ExtractFrontmatter(text)
 
 	if !hasFM {
 		// Add frontmatter with timestamps

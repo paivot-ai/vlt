@@ -9,11 +9,14 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"strings"
+
+	vlt "github.com/RamXX/vlt"
 )
 
-const version = "0.6.0"
+const version = "0.7.0"
 
 var knownCommands = map[string]bool{
 	"read": true, "search": true, "create": true,
@@ -46,9 +49,11 @@ func main() {
 	format := outputFormat(flags)
 
 	if cmd == "vaults" {
-		if err := cmdVaults(format); err != nil {
+		vaults, err := vlt.DiscoverVaults()
+		if err != nil {
 			die("%v", err)
 		}
+		printVaults(vaults, format)
 		return
 	}
 	if cmd == "" {
@@ -64,75 +69,75 @@ func main() {
 		die("vault not specified. Use vault=\"<name>\" or set VLT_VAULT env var.")
 	}
 
-	vaultDir, err := resolveVault(vaultName)
+	v, err := vlt.OpenByName(vaultName)
 	if err != nil {
 		die("%v", err)
 	}
 
-	unlock, err := lockVault(vaultDir, isWriteCommand(cmd))
+	unlock, err := vlt.LockVault(v.Dir(), vlt.IsWriteCommand(cmd))
 	if err != nil {
 		die("cannot lock vault: %v", err)
 	}
 	defer unlock()
 
-	ts := flags["timestamps"]
+	ts := timestampsEnabled(flags["timestamps"])
 
 	// Dispatch
 	switch cmd {
 	case "read":
-		err = cmdRead(vaultDir, params)
+		err = dispatchRead(v, params)
 	case "search":
-		err = cmdSearch(vaultDir, params, format)
+		err = dispatchSearch(v, params, format)
 	case "create":
-		err = cmdCreate(vaultDir, params, flags["silent"], ts)
+		err = dispatchCreate(v, params, flags["silent"], ts)
 	case "append":
-		err = cmdAppend(vaultDir, params, ts)
+		err = dispatchAppend(v, params, ts)
 	case "prepend":
-		err = cmdPrepend(vaultDir, params, ts)
+		err = dispatchPrepend(v, params, ts)
 	case "write":
-		err = cmdWrite(vaultDir, params, ts)
+		err = dispatchWrite(v, params, ts)
 	case "patch":
-		err = cmdPatch(vaultDir, params, flags["delete"], ts)
+		err = dispatchPatch(v, params, flags["delete"], ts)
 	case "move":
-		err = cmdMove(vaultDir, params)
+		err = dispatchMove(v, params)
 	case "delete":
-		err = cmdDelete(vaultDir, params, flags["permanent"])
+		err = dispatchDelete(v, params, flags["permanent"])
 	case "property:set":
-		err = cmdPropertySet(vaultDir, params)
+		err = dispatchPropertySet(v, params)
 	case "property:remove":
-		err = cmdPropertyRemove(vaultDir, params)
+		err = dispatchPropertyRemove(v, params)
 	case "properties":
-		err = cmdProperties(vaultDir, params, format)
+		err = dispatchProperties(v, params, format)
 	case "backlinks":
-		err = cmdBacklinks(vaultDir, params, format)
+		err = dispatchBacklinks(v, params, format)
 	case "links":
-		err = cmdLinks(vaultDir, params, format)
+		err = dispatchLinks(v, params, format)
 	case "orphans":
-		err = cmdOrphans(vaultDir, format)
+		err = dispatchOrphans(v, format)
 	case "unresolved":
-		err = cmdUnresolved(vaultDir, format)
+		err = dispatchUnresolved(v, format)
 	case "tags":
-		err = cmdTags(vaultDir, params, flags["counts"], format)
+		err = dispatchTags(v, params, flags["counts"], format)
 	case "tag":
-		err = cmdTag(vaultDir, params, format)
+		err = dispatchTag(v, params, format)
 	case "files":
-		err = cmdFiles(vaultDir, params, flags["total"], format)
+		err = dispatchFiles(v, params, flags["total"], format)
 	case "tasks":
-		err = cmdTasks(vaultDir, params, flags)
+		err = dispatchTasks(v, params, flags)
 	case "daily":
-		err = cmdDaily(vaultDir, params)
+		err = dispatchDaily(v, params)
 	case "templates":
-		err = cmdTemplates(vaultDir, params, format)
+		err = dispatchTemplates(v, params, format)
 	case "templates:apply":
-		err = cmdTemplatesApply(vaultDir, params)
+		err = dispatchTemplatesApply(v, params)
 	case "bookmarks":
-		err = cmdBookmarks(vaultDir, format)
+		err = dispatchBookmarks(v, format)
 	case "bookmarks:add":
-		err = cmdBookmarksAdd(vaultDir, params)
+		err = dispatchBookmarksAdd(v, params)
 	case "bookmarks:remove":
-		err = cmdBookmarksRemove(vaultDir, params)
+		err = dispatchBookmarksRemove(v, params)
 	case "uri":
-		err = cmdURI(vaultDir, vaultName, params)
+		err = dispatchURI(v, vaultName, params)
 	default:
 		die("unknown command: %s", cmd)
 	}
@@ -170,6 +175,29 @@ func parseArgs(args []string) (string, map[string]string, map[string]bool) {
 func die(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "vlt: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// readStdinIfPiped reads all of stdin if it's being piped (not a terminal).
+// Returns empty string if stdin is a terminal.
+func readStdinIfPiped() string {
+	stat, _ := os.Stdin.Stat()
+	if stat.Mode()&os.ModeCharDevice != 0 {
+		return "" // stdin is a terminal, not piped
+	}
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+// timestampsEnabled returns true if timestamps should be applied,
+// based on the explicit flag or the VLT_TIMESTAMPS environment variable.
+func timestampsEnabled(flag bool) bool {
+	if flag {
+		return true
+	}
+	return os.Getenv("VLT_TIMESTAMPS") == "1"
 }
 
 func usage() {
@@ -261,59 +289,67 @@ Wikilink support:
   [[Note]], [[Note#Heading]], [[Note#^block-id]], [[Note|Display]], ![[Embed]]
   Block references (^block-id) are fully supported in parsing, rename, and backlinks.
 
+Library usage:
+  import "github.com/RamXX/vlt"
+
+  vault, _ := vlt.OpenByName("MyVault")
+  content, _ := vault.Read("Session Operating Mode", "")
+  results, _ := vault.Search(vlt.SearchOptions{Query: "architecture"})
+  _ = vault.Append("Daily Log", "New entry", false)
+
 Examples:
-  vlt vault="Claude" read file="Session Operating Mode"
-  vlt vault="Claude" read file="Design Doc" heading="## Architecture"
-  vlt vault="Claude" search query="architecture"
-  vlt vault="Claude" search query="[status:active] [type:decision]"
-  vlt vault="Claude" create name="My Note" path="_inbox/My Note.md" content="# Hello" silent
-  echo "## Update" | vlt vault="Claude" append file="My Note"
-  vlt vault="Claude" prepend file="My Note" content="New section at top"
-  vlt vault="Claude" write file="My Note" content="# Replacement body"
-  vlt vault="Claude" patch file="Note" heading="## Section" content="new content"
-  vlt vault="Claude" patch file="Note" heading="## Section" delete
-  vlt vault="Claude" patch file="Note" line="5" content="replacement line"
-  vlt vault="Claude" patch file="Note" line="5-10" content="replacement block"
-  vlt vault="Claude" patch file="Note" line="5" delete
-  vlt vault="Claude" move path="_inbox/Old.md" to="decisions/New.md"
-  vlt vault="Claude" delete file="Old Draft"
-  vlt vault="Claude" delete file="Old Draft" permanent
-  vlt vault="Claude" properties file="My Decision"
-  vlt vault="Claude" property:set file="Note" name="status" value="archived"
-  vlt vault="Claude" property:remove file="Note" name="confidence"
-  vlt vault="Claude" backlinks file="Session Operating Mode"
-  vlt vault="Claude" links file="Developer Agent"
-  vlt vault="Claude" orphans
-  vlt vault="Claude" unresolved
-  vlt vault="Claude" tags counts sort="count"
-  vlt vault="Claude" tag tag="project"
-  vlt vault="Claude" files folder="methodology"
-  vlt vault="Claude" files total
-  vlt vault="Claude" tasks
-  vlt vault="Claude" tasks file="Project Plan" pending
-  vlt vault="Claude" tasks path="projects" --json
-  vlt vault="Claude" daily
-  vlt vault="Claude" daily date="2025-01-15"
-  vlt vault="Claude" orphans --json
-  vlt vault="Claude" search query="architecture" --csv
-  vlt vault="Claude" search query="architecture" context="2"
-  vlt vault="Claude" search query="architecture [status:active]" context="1" --json
-  vlt vault="Claude" search regex="arch\w+ure"
-  vlt vault="Claude" search regex="\d{4}-\d{2}-\d{2}" context="2"
-  vlt vault="Claude" search regex="pattern" query="[status:active]"
-  vlt vault="Claude" create name="Note" path="_inbox/Note.md" content="# Note" timestamps
-  vlt vault="Claude" append file="Note" content="more" timestamps
-  VLT_TIMESTAMPS=1 vlt vault="Claude" write file="Note" content="# New Body"
-  vlt vault="Claude" templates
-  vlt vault="Claude" templates --json
-  vlt vault="Claude" templates:apply template="Meeting Notes" name="Q1 Planning" path="meetings/Q1 Planning.md"
-  vlt vault="Claude" bookmarks
-  vlt vault="Claude" bookmarks --json
-  vlt vault="Claude" bookmarks:add file="Important Note"
-  vlt vault="Claude" bookmarks:remove file="Old Note"
-  vlt vault="Claude" uri file="Session Operating Mode"
-  vlt vault="Claude" uri file="Design Doc" heading="Architecture"
-  vlt vault="Claude" uri file="Note" block="block-id"
+  vlt vault="AgentVault" read file="Operating Mode"
+  vlt vault="AgentVault" read file="Design Doc" heading="## Architecture"
+  vlt vault="ProjectVault" search query="architecture"
+  vlt vault="ProjectVault" search query="[status:active] [type:decision]"
+  vlt vault="AgentVault" create name="My Note" path="_inbox/My Note.md" content="# Hello" silent
+  echo "## Update" | vlt vault="AgentVault" append file="My Note"
+  vlt vault="AgentVault" prepend file="My Note" content="New section at top"
+  vlt vault="AgentVault" write file="My Note" content="# Replacement body"
+  vlt vault="ProjectVault" patch file="Note" heading="## Section" content="new content"
+  vlt vault="ProjectVault" patch file="Note" heading="## Section" delete
+  vlt vault="ProjectVault" patch file="Note" line="5" content="replacement line"
+  vlt vault="ProjectVault" patch file="Note" line="5-10" content="replacement block"
+  vlt vault="ProjectVault" patch file="Note" line="5" delete
+  vlt vault="AgentVault" move path="_inbox/Old.md" to="decisions/New.md"
+  vlt vault="AgentVault" delete file="Old Draft"
+  vlt vault="AgentVault" delete file="Old Draft" permanent
+  vlt vault="ProjectVault" properties file="My Decision"
+  vlt vault="ProjectVault" property:set file="Note" name="status" value="archived"
+  vlt vault="ProjectVault" property:remove file="Note" name="confidence"
+  vlt vault="AgentVault" backlinks file="Operating Mode"
+  vlt vault="ProjectVault" links file="Developer Guide"
+  vlt vault="ProjectVault" orphans
+  vlt vault="ProjectVault" unresolved
+  vlt vault="AgentVault" tags counts sort="count"
+  vlt vault="AgentVault" tag tag="project"
+  vlt vault="ProjectVault" files folder="docs"
+  vlt vault="ProjectVault" files total
+  vlt vault="ProjectVault" tasks
+  vlt vault="ProjectVault" tasks file="Project Plan" pending
+  vlt vault="ProjectVault" tasks path="projects" --json
+  vlt vault="AgentVault" daily
+  vlt vault="AgentVault" daily date="2025-01-15"
+  vlt vault="ProjectVault" orphans --json
+  vlt vault="ProjectVault" search query="architecture" --csv
+  vlt vault="ProjectVault" search query="architecture" context="2"
+  vlt vault="ProjectVault" search query="architecture [status:active]" context="1" --json
+  vlt vault="AgentVault" search regex="arch\w+ure"
+  vlt vault="AgentVault" search regex="\d{4}-\d{2}-\d{2}" context="2"
+  vlt vault="AgentVault" search regex="pattern" query="[status:active]"
+  vlt vault="AgentVault" create name="Note" path="_inbox/Note.md" content="# Note" timestamps
+  vlt vault="AgentVault" append file="Note" content="more" timestamps
+  VLT_TIMESTAMPS=1 vlt vault="AgentVault" write file="Note" content="# New Body"
+  vlt vault="ProjectVault" templates
+  vlt vault="ProjectVault" templates --json
+  vlt vault="ProjectVault" templates:apply template="Meeting Notes" name="Q1 Planning" path="meetings/Q1 Planning.md"
+  vlt vault="AgentVault" bookmarks
+  vlt vault="AgentVault" bookmarks --json
+  vlt vault="AgentVault" bookmarks:add file="Important Note"
+  vlt vault="AgentVault" bookmarks:remove file="Old Note"
+  vlt vault="ProjectVault" uri file="Design Doc"
+  vlt vault="ProjectVault" uri file="Design Doc" heading="Architecture"
+  vlt vault="ProjectVault" uri file="Note" block="block-id"
   vlt vaults
 `)
 }

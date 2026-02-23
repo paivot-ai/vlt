@@ -1,7 +1,8 @@
 version: 2
 
 builds:
-  - binary: vlt
+  - main: ./cmd/vlt
+    binary: vlt
     env:
       - CGO_ENABLED=0
     goos:

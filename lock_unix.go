@@ -1,6 +1,6 @@
 //go:build !windows
 
-package main
+package vlt
 
 import (
 	"os"
@@ -11,8 +11,8 @@ import (
 // lockVault acquires an advisory lock on the vault directory.
 // If exclusive is true an exclusive (write) lock is taken; otherwise a shared
 // (read) lock is taken. The returned function releases the lock.
-func lockVault(vaultDir string, exclusive bool) (func(), error) {
-	p := filepath.Join(vaultDir, lockFileName)
+func LockVault(vaultDir string, exclusive bool) (func(), error) {
+	p := filepath.Join(vaultDir, LockFileName)
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, err

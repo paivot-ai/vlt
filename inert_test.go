@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"os"
@@ -12,7 +12,7 @@ import (
 
 func TestMaskFencedCodeBlock(t *testing.T) {
 	input := "Before\n```\n[[Link]] and #tag\n```\nAfter"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[Link]]") {
 		t.Error("wikilink inside fenced code block should be masked")
@@ -33,7 +33,7 @@ func TestMaskFencedCodeBlockWithLanguage(t *testing.T) {
 	for _, lang := range languages {
 		t.Run(lang, func(t *testing.T) {
 			input := "Text\n```" + lang + "\n[[Link]] #tag\n```\nMore text"
-			got := maskInertContent(input)
+			got := MaskInertContent(input)
 
 			if strings.Contains(got, "[[Link]]") {
 				t.Errorf("wikilink inside ```%s block should be masked", lang)
@@ -51,7 +51,7 @@ func TestMaskFencedCodeBlockWithLanguage(t *testing.T) {
 
 func TestMaskMermaidBlock(t *testing.T) {
 	input := "Before\n```mermaid\ngraph TD\nA[[Node A]] --> B[[Node B]]\n```\nAfter"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[Node A]]") {
 		t.Error("wikilink inside mermaid block should be masked")
@@ -92,7 +92,7 @@ func TestMaskPreservesLength(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := maskInertContent(tt.input)
+			got := MaskInertContent(tt.input)
 			if len(got) != len(tt.input) {
 				t.Errorf("length changed: input=%d, output=%d", len(tt.input), len(got))
 			}
@@ -102,7 +102,7 @@ func TestMaskPreservesLength(t *testing.T) {
 
 func TestMaskPreservesNewlines(t *testing.T) {
 	input := "Before\n```\nline1\nline2\nline3\n```\nAfter"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	inputNewlines := strings.Count(input, "\n")
 	gotNewlines := strings.Count(got, "\n")
@@ -127,7 +127,7 @@ func TestMaskPreservesNewlines(t *testing.T) {
 
 func TestMaskNonFencedContentUnchanged(t *testing.T) {
 	input := "# Title\n\nSome [[Link]] and #tag text.\n\nMore content."
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if got != input {
 		t.Errorf("non-fenced content should be unchanged:\ngot:  %q\nwant: %q", got, input)
@@ -136,7 +136,7 @@ func TestMaskNonFencedContentUnchanged(t *testing.T) {
 
 func TestMaskMultipleFencedBlocks(t *testing.T) {
 	input := "Start\n```\n[[A]]\n```\nMiddle [[B]]\n```go\n[[C]] #tag\n```\nEnd"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[A]]") {
 		t.Error("wikilink in first fenced block should be masked")
@@ -151,7 +151,7 @@ func TestMaskMultipleFencedBlocks(t *testing.T) {
 
 func TestMaskUnclosedFence(t *testing.T) {
 	input := "Before\n```\n[[Link]] and #tag\nmore content"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[Link]]") {
 		t.Error("wikilink after unclosed fence should be masked (Obsidian behavior)")
@@ -166,7 +166,7 @@ func TestMaskUnclosedFence(t *testing.T) {
 
 func TestMaskNestedBackticks(t *testing.T) {
 	input := "```\nSome `inline` code with [[Link]]\n```"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[Link]]") {
 		t.Error("wikilink inside fenced block with inline backticks should be masked")
@@ -175,7 +175,7 @@ func TestMaskNestedBackticks(t *testing.T) {
 
 func TestMaskEmptyFencedBlock(t *testing.T) {
 	input := "Before\n```\n```\nAfter"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if len(got) != len(input) {
 		t.Errorf("length changed: input=%d, output=%d", len(input), len(got))
@@ -205,7 +205,7 @@ func TestRegisteredPassesPattern(t *testing.T) {
 		return strings.ReplaceAll(text, "BBB", "CCC")
 	})
 
-	result := maskInertContent("AAA")
+	result := MaskInertContent("AAA")
 
 	if result != "CCC" {
 		t.Errorf("passes not applied in order: got %q, want %q", result, "CCC")
@@ -219,8 +219,8 @@ func TestRegisteredPassesPattern(t *testing.T) {
 
 func TestParseWikilinksIgnoresFencedCode(t *testing.T) {
 	text := "Normal [[Outside]] link.\n```\n[[Inside]] should be ignored.\n```\nMore [[AlsoOutside]]."
-	masked := maskInertContent(text)
-	links := parseWikilinks(masked)
+	masked := MaskInertContent(text)
+	links := ParseWikilinks(masked)
 
 	titles := make(map[string]bool)
 	for _, l := range links {
@@ -243,8 +243,8 @@ func TestParseWikilinksIgnoresFencedCode(t *testing.T) {
 
 func TestParseInlineTagsIgnoresFencedCode(t *testing.T) {
 	text := "Normal #outside tag.\n```\n#inside should be ignored.\n```\nMore #alsooutside."
-	masked := maskInertContent(text)
-	tags := parseInlineTags(masked)
+	masked := MaskInertContent(text)
+	tags := ParseInlineTags(masked)
 
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
@@ -279,7 +279,7 @@ func TestFindBacklinksIgnoresFencedCode(t *testing.T) {
 		0644,
 	)
 
-	results, err := findBacklinks(vaultDir, "B")
+	results, err := FindBacklinks(vaultDir, "B")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -305,7 +305,7 @@ func TestOrphansIgnoresFencedCode(t *testing.T) {
 	)
 
 	// Capture orphans by examining the function behavior
-	// cmdOrphans uses parseWikilinks which should now mask fenced content
+	// cmdOrphans uses ParseWikilinks which should now mask fenced content
 	// B should appear as an orphan since the only link to it is inside a code block
 	// We need to test the behavior through the public functions
 
@@ -319,7 +319,7 @@ func TestOrphansIgnoresFencedCode(t *testing.T) {
 		if err != nil {
 			return nil
 		}
-		for _, link := range parseWikilinks(string(data)) {
+		for _, link := range ParseWikilinks(string(data)) {
 			referenced[strings.ToLower(link.Title)] = true
 		}
 		return nil
@@ -360,7 +360,7 @@ func TestUnresolvedIgnoresFencedCode(t *testing.T) {
 		if err != nil {
 			return nil
 		}
-		for _, link := range parseWikilinks(string(data)) {
+		for _, link := range ParseWikilinks(string(data)) {
 			lower := strings.ToLower(link.Title)
 			if !titles[lower] {
 				unresolved = append(unresolved, link.Title)
@@ -395,7 +395,7 @@ func TestLinksIgnoresFencedCode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	links := parseWikilinks(string(data))
+	links := ParseWikilinks(string(data))
 
 	titles := make(map[string]bool)
 	for _, l := range links {
@@ -419,13 +419,13 @@ func TestTagsIgnoresFencedCode(t *testing.T) {
 		0644,
 	)
 
-	// Read and parse tags the same way cmdTags does through allNoteTags
+	// Read and parse tags the same way cmdTags does through AllNoteTags
 	data, err := os.ReadFile(filepath.Join(vaultDir, "note.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	tags := allNoteTags(string(data))
+	tags := AllNoteTags(string(data))
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
 		tagSet[tag] = true
@@ -453,7 +453,7 @@ func TestMermaidBlockIgnored(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	links := parseWikilinks(string(data))
+	links := ParseWikilinks(string(data))
 	titles := make(map[string]bool)
 	for _, l := range links {
 		titles[l.Title] = true
@@ -504,27 +504,27 @@ func TestE2EInertZoneFencedCode(t *testing.T) {
 
 	// --- Test backlinks ---
 	// "Design Doc" should have backlinks from "Overview" (real link)
-	backlinks, err := findBacklinks(vaultDir, "Design Doc")
+	backlinks, err := FindBacklinks(vaultDir, "Design Doc")
 	if err != nil {
-		t.Fatalf("findBacklinks Design Doc: %v", err)
+		t.Fatalf("FindBacklinks Design Doc: %v", err)
 	}
 	if len(backlinks) != 1 || backlinks[0] != "Overview.md" {
 		t.Errorf("Design Doc backlinks: got %v, want [Overview.md]", backlinks)
 	}
 
 	// "FakeLink" should have NO backlinks (only referenced in code block)
-	backlinks, err = findBacklinks(vaultDir, "FakeLink")
+	backlinks, err = FindBacklinks(vaultDir, "FakeLink")
 	if err != nil {
-		t.Fatalf("findBacklinks FakeLink: %v", err)
+		t.Fatalf("FindBacklinks FakeLink: %v", err)
 	}
 	if len(backlinks) != 0 {
 		t.Errorf("FakeLink should have 0 backlinks (code-only reference), got %v", backlinks)
 	}
 
 	// "MermaidNode" should have NO backlinks (only in mermaid block)
-	backlinks, err = findBacklinks(vaultDir, "MermaidNode")
+	backlinks, err = FindBacklinks(vaultDir, "MermaidNode")
 	if err != nil {
-		t.Fatalf("findBacklinks MermaidNode: %v", err)
+		t.Fatalf("FindBacklinks MermaidNode: %v", err)
 	}
 	if len(backlinks) != 0 {
 		t.Errorf("MermaidNode should have 0 backlinks, got %v", backlinks)
@@ -532,7 +532,7 @@ func TestE2EInertZoneFencedCode(t *testing.T) {
 
 	// --- Test links ---
 	overviewData, _ := os.ReadFile(filepath.Join(vaultDir, "Overview.md"))
-	links := parseWikilinks(string(overviewData))
+	links := ParseWikilinks(string(overviewData))
 	linkTitles := make(map[string]bool)
 	for _, l := range links {
 		linkTitles[l.Title] = true
@@ -559,7 +559,7 @@ func TestE2EInertZoneFencedCode(t *testing.T) {
 		if err != nil {
 			return nil
 		}
-		for _, link := range parseWikilinks(string(data)) {
+		for _, link := range ParseWikilinks(string(data)) {
 			referenced[strings.ToLower(link.Title)] = true
 		}
 		return nil
@@ -604,7 +604,7 @@ func TestE2EInertZoneFencedCode(t *testing.T) {
 		if err != nil {
 			return nil
 		}
-		for _, link := range parseWikilinks(string(data)) {
+		for _, link := range ParseWikilinks(string(data)) {
 			lower := strings.ToLower(link.Title)
 			if !titles[lower] {
 				unresolvedLinks = append(unresolvedLinks, link.Title)
@@ -626,7 +626,7 @@ func TestE2EInertZoneFencedCode(t *testing.T) {
 	}
 
 	// --- Test tags ---
-	overviewTags := allNoteTags(string(overviewData))
+	overviewTags := AllNoteTags(string(overviewData))
 	tagSet := make(map[string]bool)
 	for _, tag := range overviewTags {
 		tagSet[tag] = true
@@ -690,7 +690,7 @@ func TestE2EInertZoneFencedCode(t *testing.T) {
 
 func TestMaskInlineCode(t *testing.T) {
 	input := "Text `[[Link]]` more text"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[Link]]") {
 		t.Error("wikilink inside inline code should be masked")
@@ -710,7 +710,7 @@ func TestMaskInlineCode(t *testing.T) {
 
 func TestMaskDoubleBacktickCode(t *testing.T) {
 	input := "Text ``[[Link]] `with` backtick`` more"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[Link]]") {
 		t.Error("wikilink inside double-backtick inline code should be masked")
@@ -726,7 +726,7 @@ func TestMaskDoubleBacktickCode(t *testing.T) {
 
 func TestMaskMultipleInlineCodePerLine(t *testing.T) {
 	input := "See `[[A]]` then `#tag` end"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[A]]") {
 		t.Error("first inline code span should be masked")
@@ -773,7 +773,7 @@ func TestMaskInlineCodePreservesLength(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := maskInertContent(tt.input)
+			got := MaskInertContent(tt.input)
 			if len(got) != len(tt.input) {
 				t.Errorf("length changed: input=%d, output=%d", len(tt.input), len(got))
 			}
@@ -787,7 +787,7 @@ func TestMaskInlineCodeNotInFencedBlock(t *testing.T) {
 	// content. The inline code pass should not find backtick pairs inside
 	// the already-masked (all-spaces) region.
 	input := "Before\n```\nSome `inline` with [[Link]]\n```\nAfter `[[Outside]]` end"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	// The fenced block content is masked first, so [[Link]] should be gone
 	if strings.Contains(got, "[[Link]]") {
@@ -810,7 +810,7 @@ func TestMaskInlineCodeNotInFencedBlock(t *testing.T) {
 
 func TestParseWikilinksIgnoresInlineCode(t *testing.T) {
 	text := "Normal [[Outside]] link and `[[Inside]]` should be ignored."
-	links := parseWikilinks(text)
+	links := ParseWikilinks(text)
 
 	titles := make(map[string]bool)
 	for _, l := range links {
@@ -832,7 +832,7 @@ func TestParseInlineTagsIgnoresInlineCode(t *testing.T) {
 	// Use a space before #inside so the tag pattern can match it
 	// (tag pattern requires whitespace or start-of-line before #)
 	text := "Normal #outside tag and ` #inside ` should be ignored."
-	tags := parseInlineTags(text)
+	tags := ParseInlineTags(text)
 
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
@@ -864,7 +864,7 @@ func TestFindBacklinksIgnoresInlineCode(t *testing.T) {
 		0644,
 	)
 
-	results, err := findBacklinks(vaultDir, "B")
+	results, err := FindBacklinks(vaultDir, "B")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -909,7 +909,7 @@ End.
 	}
 
 	// Test wikilinks
-	links := parseWikilinks(string(data))
+	links := ParseWikilinks(string(data))
 	linkTitles := make(map[string]bool)
 	for _, l := range links {
 		linkTitles[l.Title] = true
@@ -929,7 +929,7 @@ End.
 	}
 
 	// Test tags
-	tags := allNoteTags(string(data))
+	tags := AllNoteTags(string(data))
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
 		tagSet[tag] = true
@@ -946,27 +946,27 @@ End.
 	}
 
 	// Test backlinks for RealTarget
-	backlinks, err := findBacklinks(vaultDir, "RealTarget")
+	backlinks, err := FindBacklinks(vaultDir, "RealTarget")
 	if err != nil {
-		t.Fatalf("findBacklinks: %v", err)
+		t.Fatalf("FindBacklinks: %v", err)
 	}
 	if len(backlinks) != 1 || backlinks[0] != "Mixed.md" {
 		t.Errorf("RealTarget backlinks: got %v, want [Mixed.md]", backlinks)
 	}
 
 	// Test backlinks for FakeInline -- should be zero
-	backlinks, err = findBacklinks(vaultDir, "FakeInline")
+	backlinks, err = FindBacklinks(vaultDir, "FakeInline")
 	if err != nil {
-		t.Fatalf("findBacklinks FakeInline: %v", err)
+		t.Fatalf("FindBacklinks FakeInline: %v", err)
 	}
 	if len(backlinks) != 0 {
 		t.Errorf("FakeInline should have 0 backlinks, got %v", backlinks)
 	}
 
 	// Test backlinks for FakeDouble -- should be zero
-	backlinks, err = findBacklinks(vaultDir, "FakeDouble")
+	backlinks, err = FindBacklinks(vaultDir, "FakeDouble")
 	if err != nil {
-		t.Fatalf("findBacklinks FakeDouble: %v", err)
+		t.Fatalf("FindBacklinks FakeDouble: %v", err)
 	}
 	if len(backlinks) != 0 {
 		t.Errorf("FakeDouble should have 0 backlinks, got %v", backlinks)
@@ -981,7 +981,7 @@ End.
 
 func TestMaskObsidianCommentInline(t *testing.T) {
 	input := "text %% hidden %% more"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "hidden") {
 		t.Error("content inside inline %% comment should be masked")
@@ -1000,7 +1000,7 @@ func TestMaskObsidianCommentInline(t *testing.T) {
 
 func TestMaskObsidianCommentMultiline(t *testing.T) {
 	input := "Before\n%%\nThis whole block\nis hidden in preview\n%%\nAfter"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "This whole block") {
 		t.Error("content inside multiline %% comment should be masked")
@@ -1044,7 +1044,7 @@ func TestMaskObsidianCommentPreservesLength(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := maskInertContent(tt.input)
+			got := MaskInertContent(tt.input)
 			if len(got) != len(tt.input) {
 				t.Errorf("length changed: input=%d, output=%d\ninput:  %q\noutput: %q",
 					len(tt.input), len(got), tt.input, got)
@@ -1055,7 +1055,7 @@ func TestMaskObsidianCommentPreservesLength(t *testing.T) {
 
 func TestMaskObsidianCommentPreservesNewlines(t *testing.T) {
 	input := "Before\n%%\nline1\nline2\nline3\n%%\nAfter"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	inputNewlines := strings.Count(input, "\n")
 	gotNewlines := strings.Count(got, "\n")
@@ -1079,7 +1079,7 @@ func TestMaskObsidianCommentPreservesNewlines(t *testing.T) {
 
 func TestMaskMultipleObsidianComments(t *testing.T) {
 	input := "start %% first comment %% middle %% second comment %% end"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "first comment") {
 		t.Error("first comment should be masked")
@@ -1102,7 +1102,7 @@ func TestMaskObsidianCommentInsideFencedBlock(t *testing.T) {
 	// %% inside a code block should NOT be treated as a comment boundary
 	// because the fenced code block pass runs first and masks the %% characters
 	input := "Outside\n```\n%% not a comment %%\n```\nAlso outside"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	// The code block content is masked, so %% should already be spaces.
 	// The key assertion: "Also outside" must remain intact (not masked as
@@ -1119,8 +1119,8 @@ func TestMaskObsidianCommentInsideFencedBlock(t *testing.T) {
 
 func TestParseWikilinksIgnoresObsidianComments(t *testing.T) {
 	text := "Normal [[Outside]] link.\n%% [[Inside]] should be ignored. %%\nMore [[AlsoOutside]]."
-	masked := maskInertContent(text)
-	links := parseWikilinks(masked)
+	masked := MaskInertContent(text)
+	links := ParseWikilinks(masked)
 
 	titles := make(map[string]bool)
 	for _, l := range links {
@@ -1143,8 +1143,8 @@ func TestParseWikilinksIgnoresObsidianComments(t *testing.T) {
 
 func TestParseInlineTagsIgnoresObsidianComments(t *testing.T) {
 	text := "Normal #outside tag.\n%% #inside should be ignored. %%\nMore #alsooutside."
-	masked := maskInertContent(text)
-	tags := parseInlineTags(masked)
+	masked := MaskInertContent(text)
+	tags := ParseInlineTags(masked)
 
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
@@ -1179,7 +1179,7 @@ func TestFindBacklinksIgnoresObsidianComments(t *testing.T) {
 		0644,
 	)
 
-	results, err := findBacklinks(vaultDir, "B")
+	results, err := FindBacklinks(vaultDir, "B")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1206,7 +1206,7 @@ func TestMixedCodeAndComments(t *testing.T) {
 	}
 
 	// Test wikilinks
-	links := parseWikilinks(string(data))
+	links := ParseWikilinks(string(data))
 	linkTitles := make(map[string]bool)
 	for _, l := range links {
 		linkTitles[l.Title] = true
@@ -1223,7 +1223,7 @@ func TestMixedCodeAndComments(t *testing.T) {
 	}
 
 	// Test tags
-	tags := allNoteTags(string(data))
+	tags := AllNoteTags(string(data))
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
 		tagSet[tag] = true
@@ -1248,7 +1248,7 @@ func TestMixedCodeAndComments(t *testing.T) {
 
 func TestMaskHTMLCommentInline(t *testing.T) {
 	input := "text <!-- hidden --> more"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "hidden") {
 		t.Error("content inside inline HTML comment should be masked")
@@ -1270,7 +1270,7 @@ func TestMaskHTMLCommentInline(t *testing.T) {
 
 func TestMaskHTMLCommentMultiline(t *testing.T) {
 	input := "Before\n<!--\nThis whole block\nis hidden in preview\n-->\nAfter"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "This whole block") {
 		t.Error("content inside multiline HTML comment should be masked")
@@ -1324,7 +1324,7 @@ func TestMaskHTMLCommentPreservesLength(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := maskInertContent(tt.input)
+			got := MaskInertContent(tt.input)
 			if len(got) != len(tt.input) {
 				t.Errorf("length changed: input=%d, output=%d\ninput:  %q\noutput: %q",
 					len(tt.input), len(got), tt.input, got)
@@ -1335,7 +1335,7 @@ func TestMaskHTMLCommentPreservesLength(t *testing.T) {
 
 func TestMaskMultipleHTMLComments(t *testing.T) {
 	input := "start <!-- first comment --> middle <!-- second comment --> end"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "first comment") {
 		t.Error("first HTML comment should be masked")
@@ -1358,7 +1358,7 @@ func TestMaskHTMLCommentInsideFencedBlock(t *testing.T) {
 	// <!-- inside a code block should NOT be treated as an HTML comment boundary
 	// because the fenced code block pass runs first and masks the <!-- characters
 	input := "Outside\n```\n<!-- not a comment -->\n```\nAlso outside"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	// The code block content is masked, so <!-- should already be spaces.
 	// The key assertion: "Also outside" must remain intact (not masked as
@@ -1375,8 +1375,8 @@ func TestMaskHTMLCommentInsideFencedBlock(t *testing.T) {
 
 func TestParseWikilinksIgnoresHTMLComments(t *testing.T) {
 	text := "Normal [[Outside]] link.\n<!-- [[Inside]] should be ignored. -->\nMore [[AlsoOutside]]."
-	masked := maskInertContent(text)
-	links := parseWikilinks(masked)
+	masked := MaskInertContent(text)
+	links := ParseWikilinks(masked)
 
 	titles := make(map[string]bool)
 	for _, l := range links {
@@ -1399,8 +1399,8 @@ func TestParseWikilinksIgnoresHTMLComments(t *testing.T) {
 
 func TestParseInlineTagsIgnoresHTMLComments(t *testing.T) {
 	text := "Normal #outside tag.\n<!-- #inside should be ignored. -->\nMore #alsooutside."
-	masked := maskInertContent(text)
-	tags := parseInlineTags(masked)
+	masked := MaskInertContent(text)
+	tags := ParseInlineTags(masked)
 
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
@@ -1435,7 +1435,7 @@ func TestFindBacklinksIgnoresHTMLComments(t *testing.T) {
 		0644,
 	)
 
-	results, err := findBacklinks(vaultDir, "B")
+	results, err := FindBacklinks(vaultDir, "B")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1462,7 +1462,7 @@ func TestMixedAllCommentTypes(t *testing.T) {
 	}
 
 	// Test wikilinks -- only RealLink should be found
-	links := parseWikilinks(string(data))
+	links := ParseWikilinks(string(data))
 	linkTitles := make(map[string]bool)
 	for _, l := range links {
 		linkTitles[l.Title] = true
@@ -1488,7 +1488,7 @@ func TestMixedAllCommentTypes(t *testing.T) {
 	}
 
 	// Test tags -- only real-tag should be found
-	tags := allNoteTags(string(data))
+	tags := AllNoteTags(string(data))
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
 		tagSet[tag] = true
@@ -1512,9 +1512,9 @@ func TestMixedAllCommentTypes(t *testing.T) {
 
 	// Test backlinks -- only RealLink should generate backlinks
 	for _, name := range []string{"CodeLink", "InlineCodeLink", "ObsidianCommentLink", "HTMLCommentLink", "MultilineHTMLLink"} {
-		backlinks, err := findBacklinks(vaultDir, name)
+		backlinks, err := FindBacklinks(vaultDir, name)
 		if err != nil {
-			t.Fatalf("findBacklinks %s: %v", name, err)
+			t.Fatalf("FindBacklinks %s: %v", name, err)
 		}
 		if len(backlinks) != 0 {
 			t.Errorf("%s should have 0 backlinks (inside inert zone), got %v", name, backlinks)
@@ -1522,9 +1522,9 @@ func TestMixedAllCommentTypes(t *testing.T) {
 	}
 
 	// RealLink should have a backlink from AllTypes.md
-	backlinks, err := findBacklinks(vaultDir, "RealLink")
+	backlinks, err := FindBacklinks(vaultDir, "RealLink")
 	if err != nil {
-		t.Fatalf("findBacklinks RealLink: %v", err)
+		t.Fatalf("FindBacklinks RealLink: %v", err)
 	}
 	if len(backlinks) != 1 || backlinks[0] != "AllTypes.md" {
 		t.Errorf("RealLink backlinks: got %v, want [AllTypes.md]", backlinks)
@@ -1539,7 +1539,7 @@ func TestMixedAllCommentTypes(t *testing.T) {
 
 func TestMaskDisplayMath(t *testing.T) {
 	input := "Before $$ [[Link]] + #tag $$ After"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[Link]]") {
 		t.Error("wikilink inside display math should be masked")
@@ -1561,7 +1561,7 @@ func TestMaskDisplayMath(t *testing.T) {
 
 func TestMaskDisplayMathMultiline(t *testing.T) {
 	input := "Before\n$$\n\\sum_{i=1}^{n} [[Link]]\nx_i #tag\n$$\nAfter"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[Link]]") {
 		t.Error("wikilink inside multiline display math should be masked")
@@ -1585,7 +1585,7 @@ func TestMaskDisplayMathMultiline(t *testing.T) {
 
 func TestMaskInlineMathSingle(t *testing.T) {
 	input := "The formula $x = [[y]]$ is important"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "[[y]]") {
 		t.Error("wikilink inside inline math should be masked")
@@ -1626,7 +1626,7 @@ func TestMaskMathPreservesLength(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := maskInertContent(tt.input)
+			got := MaskInertContent(tt.input)
 			if len(got) != len(tt.input) {
 				t.Errorf("length changed: input=%d, output=%d\ninput:  %q\noutput: %q",
 					len(tt.input), len(got), tt.input, got)
@@ -1659,7 +1659,7 @@ func TestMaskMathDoesNotMatchDollarAmounts(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := maskInertContent(tt.input)
+			got := MaskInertContent(tt.input)
 			if got != tt.input {
 				t.Errorf("dollar amount should not be masked:\ninput:  %q\noutput: %q", tt.input, got)
 			}
@@ -1671,7 +1671,7 @@ func TestMaskMathInsideCodeBlock(t *testing.T) {
 	// Math delimiters inside an already-masked fenced code block should NOT
 	// be double-processed. The fenced block pass runs first.
 	input := "Before\n```\n$x + y$ and $$ block $$\n```\nAfter $a + b$ end"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	// The code block content is masked first
 	if !strings.Contains(got, "Before") {
@@ -1692,7 +1692,7 @@ func TestMaskMathInsideCodeBlock(t *testing.T) {
 
 func TestMaskMultipleMathExpressions(t *testing.T) {
 	input := "First $x + 1$ then $y + 2$ and\n$$\n\\alpha + \\beta\n$$\nend"
-	got := maskInertContent(input)
+	got := MaskInertContent(input)
 
 	if strings.Contains(got, "x + 1") {
 		t.Error("first inline math should be masked")
@@ -1715,7 +1715,7 @@ func TestMaskMultipleMathExpressions(t *testing.T) {
 
 func TestParseWikilinksIgnoresMathBlocks(t *testing.T) {
 	text := "Normal [[Outside]] link.\n$$ [[DisplayInside]] $$\nInline $x=[[InlineInside]]$ formula.\nMore [[AlsoOutside]]."
-	links := parseWikilinks(text)
+	links := ParseWikilinks(text)
 
 	titles := make(map[string]bool)
 	for _, l := range links {
@@ -1741,7 +1741,7 @@ func TestParseWikilinksIgnoresMathBlocks(t *testing.T) {
 
 func TestParseInlineTagsIgnoresMathBlocks(t *testing.T) {
 	text := "Normal #outside tag.\n$$ #displaytag inside $$\nInline $x #inlinetag$ here.\nMore #alsooutside."
-	tags := parseInlineTags(text)
+	tags := ParseInlineTags(text)
 
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
@@ -1779,7 +1779,7 @@ func TestFindBacklinksIgnoresMathBlocks(t *testing.T) {
 		0644,
 	)
 
-	results, err := findBacklinks(vaultDir, "B")
+	results, err := FindBacklinks(vaultDir, "B")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1809,7 +1809,7 @@ func TestAllInertZonesCombined(t *testing.T) {
 	}
 
 	// Test wikilinks: only RealTarget and AnotherReal should be found
-	links := parseWikilinks(string(data))
+	links := ParseWikilinks(string(data))
 	linkTitles := make(map[string]bool)
 	for _, l := range links {
 		linkTitles[l.Title] = true
@@ -1844,7 +1844,7 @@ func TestAllInertZonesCombined(t *testing.T) {
 	}
 
 	// Test tags: only real-tag and another-real-tag should be found
-	tags := allNoteTags(string(data))
+	tags := AllNoteTags(string(data))
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
 		tagSet[tag] = true
@@ -1876,9 +1876,9 @@ func TestAllInertZonesCombined(t *testing.T) {
 	}
 
 	// Test backlinks for RealTarget
-	backlinks, err := findBacklinks(vaultDir, "RealTarget")
+	backlinks, err := FindBacklinks(vaultDir, "RealTarget")
 	if err != nil {
-		t.Fatalf("findBacklinks RealTarget: %v", err)
+		t.Fatalf("FindBacklinks RealTarget: %v", err)
 	}
 	if len(backlinks) != 1 || backlinks[0] != "AllZones.md" {
 		t.Errorf("RealTarget backlinks: got %v, want [AllZones.md]", backlinks)
@@ -1886,9 +1886,9 @@ func TestAllInertZonesCombined(t *testing.T) {
 
 	// Test backlinks for inert-zone links: should all be zero
 	for _, inertTitle := range []string{"FencedLink", "InlineCodeLink", "CommentLink", "HTMLLink", "DisplayMathLink", "InlineMathLink"} {
-		bl, err := findBacklinks(vaultDir, inertTitle)
+		bl, err := FindBacklinks(vaultDir, inertTitle)
 		if err != nil {
-			t.Fatalf("findBacklinks %s: %v", inertTitle, err)
+			t.Fatalf("FindBacklinks %s: %v", inertTitle, err)
 		}
 		if len(bl) != 0 {
 			t.Errorf("%s should have 0 backlinks (inside inert zone), got %v", inertTitle, bl)
@@ -1914,7 +1914,7 @@ func allZoneContent(target, tagName string) string {
 
 // TestE2EAllInertZonesBacklinks creates a vault with note A containing [[B]] in
 // every inert zone type (6 zones) and one real [[B]] outside any zone.
-// Verifies findBacklinks returns A exactly once.
+// Verifies FindBacklinks returns A exactly once.
 func TestE2EAllInertZonesBacklinks(t *testing.T) {
 	vaultDir := t.TempDir()
 
@@ -1923,9 +1923,9 @@ func TestE2EAllInertZonesBacklinks(t *testing.T) {
 	os.WriteFile(filepath.Join(vaultDir, "A.md"), []byte(content), 0644)
 	os.WriteFile(filepath.Join(vaultDir, "B.md"), []byte("# B\n\nTarget note.\n"), 0644)
 
-	backlinks, err := findBacklinks(vaultDir, "B")
+	backlinks, err := FindBacklinks(vaultDir, "B")
 	if err != nil {
-		t.Fatalf("findBacklinks: %v", err)
+		t.Fatalf("FindBacklinks: %v", err)
 	}
 
 	if len(backlinks) != 1 {
@@ -1937,7 +1937,7 @@ func TestE2EAllInertZonesBacklinks(t *testing.T) {
 }
 
 // TestE2EAllInertZonesBacklinksAllMasked is like the above but with NO real link
-// outside zones. findBacklinks must return empty.
+// outside zones. FindBacklinks must return empty.
 func TestE2EAllInertZonesBacklinksAllMasked(t *testing.T) {
 	vaultDir := t.TempDir()
 
@@ -1946,9 +1946,9 @@ func TestE2EAllInertZonesBacklinksAllMasked(t *testing.T) {
 	os.WriteFile(filepath.Join(vaultDir, "A.md"), []byte(content), 0644)
 	os.WriteFile(filepath.Join(vaultDir, "B.md"), []byte("# B\n\nTarget note.\n"), 0644)
 
-	backlinks, err := findBacklinks(vaultDir, "B")
+	backlinks, err := FindBacklinks(vaultDir, "B")
 	if err != nil {
-		t.Fatalf("findBacklinks: %v", err)
+		t.Fatalf("FindBacklinks: %v", err)
 	}
 
 	if len(backlinks) != 0 {
@@ -1981,7 +1981,7 @@ func TestE2EAllInertZonesOrphans(t *testing.T) {
 		if err != nil {
 			return nil
 		}
-		for _, link := range parseWikilinks(string(data)) {
+		for _, link := range ParseWikilinks(string(data)) {
 			referenced[strings.ToLower(link.Title)] = true
 		}
 		return nil
@@ -2077,7 +2077,7 @@ func TestE2EAllInertZonesUnresolved(t *testing.T) {
 		if err != nil {
 			return nil
 		}
-		for _, link := range parseWikilinks(string(data)) {
+		for _, link := range ParseWikilinks(string(data)) {
 			lower := strings.ToLower(link.Title)
 			if !titles[lower] {
 				unresolved = append(unresolved, link.Title)
@@ -2119,7 +2119,7 @@ func TestE2EAllInertZonesTags(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tags := allNoteTags(string(data))
+	tags := AllNoteTags(string(data))
 
 	// Count occurrences of "mytag"
 	mytagCount := 0
@@ -2162,7 +2162,7 @@ func TestE2EAllInertZonesTagSearch(t *testing.T) {
 		if err != nil {
 			return nil
 		}
-		for _, tag := range allNoteTags(string(data)) {
+		for _, tag := range AllNoteTags(string(data)) {
 			if tag == tagLower || strings.HasPrefix(tag, tagLower+"/") {
 				relPath, _ := filepath.Rel(vaultDir, path)
 				results = append(results, relPath)
@@ -2282,7 +2282,7 @@ End of document. Real tag: #reviewed
 	text := string(data)
 
 	// --- Test links ---
-	links := parseWikilinks(text)
+	links := ParseWikilinks(text)
 	linkTitles := make(map[string]bool)
 	for _, l := range links {
 		linkTitles[l.Title] = true
@@ -2306,7 +2306,7 @@ End of document. Real tag: #reviewed
 	}
 
 	// --- Test tags ---
-	tags := allNoteTags(text)
+	tags := AllNoteTags(text)
 	tagSet := make(map[string]bool)
 	for _, tag := range tags {
 		tagSet[tag] = true
@@ -2330,9 +2330,9 @@ End of document. Real tag: #reviewed
 
 	// --- Test backlinks ---
 	for _, title := range realLinks {
-		bl, err := findBacklinks(vaultDir, title)
+		bl, err := FindBacklinks(vaultDir, title)
 		if err != nil {
-			t.Fatalf("findBacklinks %s: %v", title, err)
+			t.Fatalf("FindBacklinks %s: %v", title, err)
 		}
 		if len(bl) != 1 || bl[0] != "Architecture.md" {
 			t.Errorf("backlinks for %s: got %v, want [Architecture.md]", title, bl)
@@ -2341,9 +2341,9 @@ End of document. Real tag: #reviewed
 
 	// Fake targets should have 0 backlinks
 	for _, title := range fakeLinks {
-		bl, err := findBacklinks(vaultDir, title)
+		bl, err := FindBacklinks(vaultDir, title)
 		if err != nil {
-			t.Fatalf("findBacklinks %s: %v", title, err)
+			t.Fatalf("FindBacklinks %s: %v", title, err)
 		}
 		if len(bl) != 0 {
 			t.Errorf("%s should have 0 backlinks (inside inert zone), got %v", title, bl)
@@ -2360,7 +2360,7 @@ End of document. Real tag: #reviewed
 		if err != nil {
 			return nil
 		}
-		for _, link := range parseWikilinks(string(data)) {
+		for _, link := range ParseWikilinks(string(data)) {
 			referenced[strings.ToLower(link.Title)] = true
 		}
 		return nil
@@ -2393,7 +2393,7 @@ End of document. Real tag: #reviewed
 		if err != nil {
 			return nil
 		}
-		for _, link := range parseWikilinks(string(data)) {
+		for _, link := range ParseWikilinks(string(data)) {
 			lower := strings.ToLower(link.Title)
 			if !titleSet[lower] {
 				unresolvedLinks = append(unresolvedLinks, link.Title)
@@ -2487,39 +2487,40 @@ func TestE2EMaskingDoesNotCorruptContent(t *testing.T) {
 		originals[name] = data
 	}
 
-	// Exercise ALL masking-dependent operations to trigger maskInertContent
+	// Exercise ALL masking-dependent operations to trigger MaskInertContent
 
-	// 1. backlinks (calls maskInertContent on every file)
-	findBacklinks(vaultDir, "B")
-	findBacklinks(vaultDir, "C")
-	findBacklinks(vaultDir, "A")
+	// 1. backlinks (calls MaskInertContent on every file)
+	FindBacklinks(vaultDir, "B")
+	FindBacklinks(vaultDir, "C")
+	FindBacklinks(vaultDir, "A")
 
-	// 2. parseWikilinks (calls maskInertContent)
+	// 2. ParseWikilinks (calls MaskInertContent)
 	for name := range files {
 		data, _ := os.ReadFile(filepath.Join(vaultDir, name))
-		parseWikilinks(string(data))
+		ParseWikilinks(string(data))
 	}
 
-	// 3. allNoteTags / parseInlineTags (calls maskInertContent)
+	// 3. AllNoteTags / ParseInlineTags (calls MaskInertContent)
 	for name := range files {
 		data, _ := os.ReadFile(filepath.Join(vaultDir, name))
-		allNoteTags(string(data))
-		parseInlineTags(string(data))
+		AllNoteTags(string(data))
+		ParseInlineTags(string(data))
 	}
 
-	// 4. Run the actual command functions that use masking
-	// cmdOrphans
-	cmdOrphans(vaultDir, "")
-	// cmdUnresolved
-	cmdUnresolved(vaultDir, "")
-	// cmdTags
-	cmdTags(vaultDir, map[string]string{}, false, "")
-	// cmdTag
-	cmdTag(vaultDir, map[string]string{"tag": "real-tag"}, "")
-	// cmdLinks
-	cmdLinks(vaultDir, map[string]string{"file": "A"}, "")
-	// cmdBacklinks
-	cmdBacklinks(vaultDir, map[string]string{"file": "B"}, "")
+	// 4. Run the actual Vault methods that use masking
+	v := &Vault{dir: vaultDir}
+	// Orphans
+	v.Orphans()
+	// Unresolved
+	v.Unresolved()
+	// Tags
+	v.Tags("")
+	// Tag
+	v.Tag("real-tag")
+	// Links
+	v.Links("A")
+	// Backlinks
+	v.Backlinks("B")
 
 	// Now verify every file is byte-for-byte identical to the original
 	for name, original := range originals {

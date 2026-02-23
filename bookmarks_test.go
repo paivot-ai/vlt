@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"encoding/json"
@@ -248,24 +248,23 @@ func TestBookmarksListIntegration(t *testing.T) {
 	data, _ := json.Marshal(bm)
 	os.WriteFile(filepath.Join(vaultDir, ".obsidian", "bookmarks.json"), data, 0644)
 
-	got := captureStdout(func() {
-		if err := cmdBookmarks(vaultDir, ""); err != nil {
-			t.Fatalf("cmdBookmarks: %v", err)
-		}
-	})
+	v := &Vault{dir: vaultDir}
+	paths, err := v.Bookmarks()
+	if err != nil {
+		t.Fatalf("Bookmarks: %v", err)
+	}
 
-	lines := strings.Split(strings.TrimSpace(got), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("got %d lines, want 3: %q", len(lines), got)
+	if len(paths) != 3 {
+		t.Fatalf("got %d paths, want 3: %v", len(paths), paths)
 	}
-	if lines[0] != "notes/Alpha.md" {
-		t.Errorf("line[0] = %q, want notes/Alpha.md", lines[0])
+	if paths[0] != "notes/Alpha.md" {
+		t.Errorf("paths[0] = %q, want notes/Alpha.md", paths[0])
 	}
-	if lines[1] != "notes/Beta.md" {
-		t.Errorf("line[1] = %q, want notes/Beta.md", lines[1])
+	if paths[1] != "notes/Beta.md" {
+		t.Errorf("paths[1] = %q, want notes/Beta.md", paths[1])
 	}
-	if lines[2] != "notes/Gamma.md" {
-		t.Errorf("line[2] = %q, want notes/Gamma.md", lines[2])
+	if paths[2] != "notes/Gamma.md" {
+		t.Errorf("paths[2] = %q, want notes/Gamma.md", paths[2])
 	}
 }
 
@@ -283,9 +282,10 @@ func TestBookmarksAddIntegration(t *testing.T) {
 	os.WriteFile(filepath.Join(vaultDir, ".obsidian", "bookmarks.json"), data, 0644)
 
 	// Add bookmark
-	params := map[string]string{"file": "MyNote"}
-	if err := cmdBookmarksAdd(vaultDir, params); err != nil {
-		t.Fatalf("cmdBookmarksAdd: %v", err)
+	v := &Vault{dir: vaultDir}
+	_, err := v.BookmarksAdd("MyNote")
+	if err != nil {
+		t.Fatalf("BookmarksAdd: %v", err)
 	}
 
 	// Re-read the file and verify
@@ -320,9 +320,9 @@ func TestBookmarksRemoveIntegration(t *testing.T) {
 	os.WriteFile(filepath.Join(vaultDir, ".obsidian", "bookmarks.json"), data, 0644)
 
 	// Remove bookmark
-	params := map[string]string{"file": "RemoveMe"}
-	if err := cmdBookmarksRemove(vaultDir, params); err != nil {
-		t.Fatalf("cmdBookmarksRemove: %v", err)
+	v := &Vault{dir: vaultDir}
+	if err := v.BookmarksRemove("RemoveMe"); err != nil {
+		t.Fatalf("BookmarksRemove: %v", err)
 	}
 
 	// Verify it was removed
@@ -356,9 +356,10 @@ func TestBookmarksAddResolvesTitle(t *testing.T) {
 	os.WriteFile(filepath.Join(vaultDir, ".obsidian", "bookmarks.json"), data, 0644)
 
 	// Add by title
-	params := map[string]string{"file": "Hidden Gem"}
-	if err := cmdBookmarksAdd(vaultDir, params); err != nil {
-		t.Fatalf("cmdBookmarksAdd: %v", err)
+	v := &Vault{dir: vaultDir}
+	_, err := v.BookmarksAdd("Hidden Gem")
+	if err != nil {
+		t.Fatalf("BookmarksAdd: %v", err)
 	}
 
 	loaded, err := loadBookmarks(vaultDir)
@@ -373,70 +374,6 @@ func TestBookmarksAddResolvesTitle(t *testing.T) {
 	}
 }
 
-func TestBookmarksWithFormats(t *testing.T) {
-	vaultDir := t.TempDir()
-	os.MkdirAll(filepath.Join(vaultDir, ".obsidian"), 0755)
-
-	bm := bookmarksFile{
-		Items: []bookmark{
-			{Type: "file", Ctime: 1708300000000, Path: "notes/Alpha.md"},
-			{Type: "file", Ctime: 1708300000001, Path: "notes/Beta.md"},
-		},
-	}
-	data, _ := json.Marshal(bm)
-	os.WriteFile(filepath.Join(vaultDir, ".obsidian", "bookmarks.json"), data, 0644)
-
-	// JSON
-	jsonOut := captureStdout(func() {
-		if err := cmdBookmarks(vaultDir, "json"); err != nil {
-			t.Fatalf("json format: %v", err)
-		}
-	})
-	var jsonParsed []string
-	if err := json.Unmarshal([]byte(strings.TrimSpace(jsonOut)), &jsonParsed); err != nil {
-		t.Fatalf("json parse error: %v\noutput: %q", err, jsonOut)
-	}
-	if len(jsonParsed) != 2 {
-		t.Errorf("json: got %d items, want 2", len(jsonParsed))
-	}
-
-	// CSV
-	csvOut := captureStdout(func() {
-		if err := cmdBookmarks(vaultDir, "csv"); err != nil {
-			t.Fatalf("csv format: %v", err)
-		}
-	})
-	csvLines := strings.Split(strings.TrimSpace(csvOut), "\n")
-	if len(csvLines) != 2 {
-		t.Errorf("csv: got %d lines, want 2 (no header for list): %q", len(csvLines), csvOut)
-	}
-
-	// YAML
-	yamlOut := captureStdout(func() {
-		if err := cmdBookmarks(vaultDir, "yaml"); err != nil {
-			t.Fatalf("yaml format: %v", err)
-		}
-	})
-	if !strings.Contains(yamlOut, "- notes/Alpha.md") {
-		t.Errorf("yaml: missing expected content, got: %q", yamlOut)
-	}
-
-	// TSV
-	tsvOut := captureStdout(func() {
-		if err := cmdBookmarks(vaultDir, "tsv"); err != nil {
-			t.Fatalf("tsv format: %v", err)
-		}
-	})
-	tsvLines := strings.Split(strings.TrimSpace(tsvOut), "\n")
-	// TSV formatList has a header "file" then items
-	if len(tsvLines) != 3 {
-		t.Errorf("tsv: got %d lines, want 3 (header + 2 items): %q", len(tsvLines), tsvOut)
-	}
-	if tsvLines[0] != "file" {
-		t.Errorf("tsv header = %q, want 'file'", tsvLines[0])
-	}
-}
-
 func TestBookmarksAddCreatesObsidianDir(t *testing.T) {
 	vaultDir := t.TempDir()
 	// No .obsidian directory exists
@@ -445,9 +382,10 @@ func TestBookmarksAddCreatesObsidianDir(t *testing.T) {
 	os.WriteFile(filepath.Join(vaultDir, "NewNote.md"), []byte("# New Note\n"), 0644)
 
 	// Add bookmark -- should create .obsidian/ and bookmarks.json
-	params := map[string]string{"file": "NewNote"}
-	if err := cmdBookmarksAdd(vaultDir, params); err != nil {
-		t.Fatalf("cmdBookmarksAdd: %v", err)
+	v := &Vault{dir: vaultDir}
+	_, err := v.BookmarksAdd("NewNote")
+	if err != nil {
+		t.Fatalf("BookmarksAdd: %v", err)
 	}
 
 	// Verify .obsidian/bookmarks.json was created
@@ -472,15 +410,15 @@ func TestBookmarksListNoObsidianDir(t *testing.T) {
 	vaultDir := t.TempDir()
 	// No .obsidian directory
 
-	got := captureStdout(func() {
-		if err := cmdBookmarks(vaultDir, ""); err != nil {
-			t.Fatalf("cmdBookmarks should not error on missing dir: %v", err)
-		}
-	})
+	v := &Vault{dir: vaultDir}
+	paths, err := v.Bookmarks()
+	if err != nil {
+		t.Fatalf("Bookmarks should not error on missing dir: %v", err)
+	}
 
-	// Should produce no output (empty list)
-	if strings.TrimSpace(got) != "" {
-		t.Errorf("expected empty output, got: %q", got)
+	// Should return empty list
+	if len(paths) != 0 {
+		t.Errorf("expected empty list, got: %v", paths)
 	}
 }
 
@@ -491,10 +429,10 @@ func TestBookmarksRemoveNoFile(t *testing.T) {
 	// Create the note so resolveNote works
 	os.WriteFile(filepath.Join(vaultDir, "Orphan.md"), []byte("# Orphan\n"), 0644)
 
-	params := map[string]string{"file": "Orphan"}
-	err := cmdBookmarksRemove(vaultDir, params)
+	v := &Vault{dir: vaultDir}
+	err := v.BookmarksRemove("Orphan")
 	if err == nil {
-		t.Fatal("cmdBookmarksRemove should error when bookmarks.json does not exist")
+		t.Fatal("BookmarksRemove should error when bookmarks.json does not exist")
 	}
 	if !strings.Contains(err.Error(), "no bookmarks file") {
 		t.Errorf("error = %q, want message about no bookmarks file", err.Error())
@@ -518,9 +456,10 @@ func TestBookmarksAddDuplicateIntegration(t *testing.T) {
 	os.WriteFile(filepath.Join(vaultDir, ".obsidian", "bookmarks.json"), data, 0644)
 
 	// Add again -- should be a no-op
-	params := map[string]string{"file": "Dup"}
-	if err := cmdBookmarksAdd(vaultDir, params); err != nil {
-		t.Fatalf("cmdBookmarksAdd duplicate: %v", err)
+	v := &Vault{dir: vaultDir}
+	_, err := v.BookmarksAdd("Dup")
+	if err != nil {
+		t.Fatalf("BookmarksAdd duplicate: %v", err)
 	}
 
 	// Verify still only 1 item

@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"fmt"
@@ -8,8 +8,8 @@ import (
 	"strings"
 )
 
-// wikilink represents a parsed [[...]] or ![[...]] reference in a note.
-type wikilink struct {
+// Wikilink represents a parsed [[...]] or ![[...]] reference in a note.
+type Wikilink struct {
 	Title   string // note title (e.g., "Session Operating Mode")
 	Heading string // optional heading without # (e.g., "Section")
 	BlockID string // optional block ID without ^ (e.g., "my-block")
@@ -23,15 +23,15 @@ type wikilink struct {
 // [[Title#Heading|Display]], [[Title#^block-id|Display]].
 var wikiLinkPattern = regexp.MustCompile(`(!?)\[\[([^\]#|]+?)(?:#(\^?[^\]|]*))?(?:\|([^\]]*))?\]\]`)
 
-// parseWikilinks extracts all wikilinks and embeds from text.
+// ParseWikilinks extracts all wikilinks and embeds from text.
 // Content inside inert zones (fenced code blocks, etc.) is masked
 // before extraction so those references are ignored.
-func parseWikilinks(text string) []wikilink {
-	text = maskInertContent(text)
+func ParseWikilinks(text string) []Wikilink {
+	text = MaskInertContent(text)
 	matches := wikiLinkPattern.FindAllStringSubmatch(text, -1)
-	links := make([]wikilink, 0, len(matches))
+	links := make([]Wikilink, 0, len(matches))
 	for _, m := range matches {
-		wl := wikilink{
+		wl := Wikilink{
 			Embed: m[1] == "!",
 			Title: strings.TrimSpace(m[2]),
 			Raw:   m[0],
@@ -52,10 +52,10 @@ func parseWikilinks(text string) []wikilink {
 	return links
 }
 
-// replaceWikilinks replaces all wikilinks and embeds referencing oldTitle
+// ReplaceWikilinks replaces all wikilinks and embeds referencing oldTitle
 // with newTitle, preserving the !prefix, #heading, and |display text.
 // Case-insensitive to match Obsidian's link resolution behavior.
-func replaceWikilinks(text, oldTitle, newTitle string) string {
+func ReplaceWikilinks(text, oldTitle, newTitle string) string {
 	pattern := regexp.MustCompile(
 		`(?i)(!?)\[\[` + regexp.QuoteMeta(oldTitle) +
 			`((?:#[^\]|]*)?)` +
@@ -88,7 +88,7 @@ func updateVaultLinks(vaultDir, oldTitle, newTitle string) (int, error) {
 		}
 
 		text := string(data)
-		updated := replaceWikilinks(text, oldTitle, newTitle)
+		updated := ReplaceWikilinks(text, oldTitle, newTitle)
 		if updated != text {
 			if err := os.WriteFile(path, []byte(updated), 0644); err != nil {
 				return fmt.Errorf("failed to update %s: %w", path, err)
@@ -184,14 +184,15 @@ func updateVaultMdLinks(vaultDir, oldRelPath, newRelPath string) (int, error) {
 	return modified, err
 }
 
-// findBacklinks returns relative paths of notes that contain wikilinks or
+// FindBacklinks returns relative paths of notes that contain wikilinks or
 // embeds referencing the given title. Case-insensitive.
 // Content inside inert zones (fenced code blocks, etc.) is masked before
 // matching so that references inside code blocks are ignored.
-func findBacklinks(vaultDir, title string) ([]string, error) {
+func FindBacklinks(vaultDir, title string) ([]string, error) {
 	pattern := regexp.MustCompile(
 		`(?i)!?\[\[` + regexp.QuoteMeta(title) +
-			`(?:#[^\]|]*)?(?:\|[^\]]*)?\]\]`)
+			`(?:#[^\]|]*)?(?:\|[^\]]*)?` +
+			`\]\]`)
 
 	var results []string
 
@@ -213,7 +214,7 @@ func findBacklinks(vaultDir, title string) ([]string, error) {
 			return nil
 		}
 
-		masked := maskInertContent(string(data))
+		masked := MaskInertContent(string(data))
 		if pattern.MatchString(masked) {
 			relPath, _ := filepath.Rel(vaultDir, path)
 			results = append(results, relPath)

@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"encoding/json"
@@ -57,13 +57,13 @@ func substituteTemplateVars(content string, title string, now time.Time) string 
 			return title
 		case "date":
 			if varFormat != "" {
-				goFmt := momentToGoFormat(varFormat)
+				goFmt := MomentToGoFormat(varFormat)
 				return now.Format(goFmt)
 			}
 			return now.Format("2006-01-02")
 		case "time":
 			if varFormat != "" {
-				goFmt := momentToGoFormat(varFormat)
+				goFmt := MomentToGoFormat(varFormat)
 				return now.Format(goFmt)
 			}
 			return now.Format("15:04")
@@ -73,14 +73,17 @@ func substituteTemplateVars(content string, title string, now time.Time) string 
 	})
 }
 
-// cmdTemplates lists available template files in the configured template folder.
-func cmdTemplates(vaultDir string, params map[string]string, format string) error {
-	folder, err := discoverTemplateFolder(vaultDir)
+// Templates lists available template files in the configured template folder.
+func (v *Vault) Templates() ([]string, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	folder, err := discoverTemplateFolder(v.dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	tmplDir := filepath.Join(vaultDir, folder)
+	tmplDir := filepath.Join(v.dir, folder)
 
 	var templates []string
 	err = filepath.WalkDir(tmplDir, func(path string, d os.DirEntry, err error) error {
@@ -98,35 +101,26 @@ func cmdTemplates(vaultDir string, params map[string]string, format string) erro
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	sort.Strings(templates)
-	formatList(templates, format)
-	return nil
+	return templates, nil
 }
 
-// cmdTemplatesApply reads a template file, substitutes variables, and creates
+// TemplatesApply reads a template file, substitutes variables, and creates
 // a new note at the specified path.
-func cmdTemplatesApply(vaultDir string, params map[string]string) error {
-	templateName := params["template"]
-	noteName := params["name"]
-	notePath := params["path"]
+func (v *Vault) TemplatesApply(templateName, noteName, notePath string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 
-	if templateName == "" {
-		return fmt.Errorf("templates:apply requires template=\"<name>\"")
-	}
-	if noteName == "" || notePath == "" {
-		return fmt.Errorf("templates:apply requires name=\"<title>\" path=\"<path>\"")
-	}
-
-	folder, err := discoverTemplateFolder(vaultDir)
+	folder, err := discoverTemplateFolder(v.dir)
 	if err != nil {
 		return err
 	}
 
 	// Resolve template file
-	tmplPath := filepath.Join(vaultDir, folder, templateName)
+	tmplPath := filepath.Join(v.dir, folder, templateName)
 	if !strings.HasSuffix(tmplPath, ".md") {
 		tmplPath += ".md"
 	}
@@ -137,7 +131,7 @@ func cmdTemplatesApply(vaultDir string, params map[string]string) error {
 	}
 
 	// Check target doesn't already exist
-	fullPath := filepath.Join(vaultDir, notePath)
+	fullPath := filepath.Join(v.dir, notePath)
 	if _, err := os.Stat(fullPath); err == nil {
 		return fmt.Errorf("note already exists: %s", notePath)
 	}
@@ -150,10 +144,5 @@ func cmdTemplatesApply(vaultDir string, params map[string]string) error {
 		return err
 	}
 
-	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
-		return err
-	}
-
-	fmt.Printf("created: %s (from template %q)\n", notePath, templateName)
-	return nil
+	return os.WriteFile(fullPath, []byte(content), 0644)
 }

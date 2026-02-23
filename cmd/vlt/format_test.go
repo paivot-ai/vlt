@@ -1,45 +1,11 @@
 package main
 
 import (
-	"bytes"
-	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
+
+	vlt "github.com/RamXX/vlt"
 )
-
-// captureStdout captures stdout output from a function call.
-func captureStdout(fn func()) string {
-	old := os.Stdout
-	r, w, _ := os.Pipe()
-	os.Stdout = w
-
-	fn()
-
-	w.Close()
-	os.Stdout = old
-
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	return buf.String()
-}
-
-// captureStderr captures stderr output from a function call.
-func captureStderr(fn func()) string {
-	old := os.Stderr
-	r, w, _ := os.Pipe()
-	os.Stderr = w
-
-	fn()
-
-	w.Close()
-	os.Stderr = old
-
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	return buf.String()
-}
 
 func TestOutputFormat(t *testing.T) {
 	tests := []struct {
@@ -144,8 +110,8 @@ func TestFormatTable_YAML(t *testing.T) {
 }
 
 func TestFormatSearchResults_JSON(t *testing.T) {
-	results := []searchResult{
-		{title: "Note A", relPath: "folder/Note A.md"},
+	results := []vlt.SearchResult{
+		{Title: "Note A", RelPath: "folder/Note A.md"},
 	}
 	got := captureStdout(func() {
 		formatSearchResults(results, "json")
@@ -156,7 +122,7 @@ func TestFormatSearchResults_JSON(t *testing.T) {
 }
 
 func TestFormatLinks_JSON(t *testing.T) {
-	links := []linkInfo{
+	links := []vlt.LinkInfo{
 		{Target: "Note", Path: "Note.md", Broken: false},
 		{Target: "Missing", Path: "", Broken: true},
 	}
@@ -269,9 +235,9 @@ func TestFormatTableTSV(t *testing.T) {
 }
 
 func TestFormatSearchResultsTSV(t *testing.T) {
-	results := []searchResult{
-		{title: "Note A", relPath: "folder/Note A.md"},
-		{title: "Note B", relPath: "Note B.md"},
+	results := []vlt.SearchResult{
+		{Title: "Note A", RelPath: "folder/Note A.md"},
+		{Title: "Note B", RelPath: "Note B.md"},
 	}
 	got := captureStdout(func() {
 		formatSearchResults(results, "tsv")
@@ -289,7 +255,7 @@ func TestFormatSearchResultsTSV(t *testing.T) {
 }
 
 func TestFormatLinksTSV(t *testing.T) {
-	links := []linkInfo{
+	links := []vlt.LinkInfo{
 		{Target: "Note", Path: "Note.md", Broken: false},
 		{Target: "Missing", Path: "", Broken: true},
 	}
@@ -312,7 +278,7 @@ func TestFormatLinksTSV(t *testing.T) {
 }
 
 func TestFormatUnresolvedTSV(t *testing.T) {
-	results := []unresolvedResult{
+	results := []vlt.UnresolvedLink{
 		{Target: "Missing Note", Source: "folder/Ref.md"},
 	}
 	got := captureStdout(func() {
@@ -391,7 +357,7 @@ func TestFormatPropertiesTSV(t *testing.T) {
 }
 
 func TestFormatSearchWithContextTSV(t *testing.T) {
-	matches := []contextMatch{
+	matches := []vlt.ContextMatch{
 		{File: "note.md", Line: 3, Match: "hello world", Context: []string{"line 2", "hello world", "line 4"}},
 	}
 	got := captureStdout(func() {
@@ -484,156 +450,5 @@ func TestFormatListTreeEmpty(t *testing.T) {
 	})
 	if got != "" {
 		t.Errorf("empty tree should produce no output, got %q", got)
-	}
-}
-
-// --- Integration tests: real files, no mocks ---
-
-func TestFilesTSVIntegration(t *testing.T) {
-	vaultDir := t.TempDir()
-	os.MkdirAll(filepath.Join(vaultDir, "folder"), 0755)
-	os.WriteFile(filepath.Join(vaultDir, "Root.md"), []byte("# Root"), 0644)
-	os.WriteFile(filepath.Join(vaultDir, "folder", "Inner.md"), []byte("# Inner"), 0644)
-
-	got := captureStdout(func() {
-		err := cmdFiles(vaultDir, map[string]string{}, false, "tsv")
-		if err != nil {
-			t.Fatalf("cmdFiles error: %v", err)
-		}
-	})
-
-	lines := strings.Split(strings.TrimSpace(got), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("expected 3 lines (header + 2 files), got %d: %q", len(lines), got)
-	}
-	if lines[0] != "file" {
-		t.Errorf("header = %q, want %q", lines[0], "file")
-	}
-	// Files are sorted: Root.md, folder/Inner.md
-	if lines[1] != "Root.md" {
-		t.Errorf("line 1 = %q, want %q", lines[1], "Root.md")
-	}
-	if lines[2] != "folder/Inner.md" {
-		t.Errorf("line 2 = %q, want %q", lines[2], "folder/Inner.md")
-	}
-}
-
-func TestFilesTreeIntegration(t *testing.T) {
-	vaultDir := t.TempDir()
-	os.MkdirAll(filepath.Join(vaultDir, "folder"), 0755)
-	os.MkdirAll(filepath.Join(vaultDir, "other"), 0755)
-	os.WriteFile(filepath.Join(vaultDir, "Root.md"), []byte("# Root"), 0644)
-	os.WriteFile(filepath.Join(vaultDir, "folder", "Note A.md"), []byte("# A"), 0644)
-	os.WriteFile(filepath.Join(vaultDir, "folder", "Note B.md"), []byte("# B"), 0644)
-	os.WriteFile(filepath.Join(vaultDir, "other", "Note C.md"), []byte("# C"), 0644)
-
-	got := captureStdout(func() {
-		err := cmdFiles(vaultDir, map[string]string{}, false, "tree")
-		if err != nil {
-			t.Fatalf("cmdFiles error: %v", err)
-		}
-	})
-
-	// Verify tree structure contains expected elements
-	if !strings.Contains(got, "folder/") {
-		t.Errorf("tree output missing 'folder/': %q", got)
-	}
-	if !strings.Contains(got, "other/") {
-		t.Errorf("tree output missing 'other/': %q", got)
-	}
-	if !strings.Contains(got, "Note A.md") {
-		t.Errorf("tree output missing 'Note A.md': %q", got)
-	}
-	if !strings.Contains(got, "Root.md") {
-		t.Errorf("tree output missing 'Root.md': %q", got)
-	}
-	// Should contain Unicode box-drawing characters
-	if !strings.Contains(got, "\u2514") && !strings.Contains(got, "\u251c") {
-		t.Errorf("tree output missing Unicode box-drawing characters: %q", got)
-	}
-}
-
-func TestSearchTSVIntegration(t *testing.T) {
-	vaultDir := t.TempDir()
-	os.MkdirAll(filepath.Join(vaultDir, "folder"), 0755)
-	os.WriteFile(filepath.Join(vaultDir, "folder", "Architecture.md"), []byte("# Architecture\nSome design notes."), 0644)
-	os.WriteFile(filepath.Join(vaultDir, "Other.md"), []byte("# Other\nNothing here."), 0644)
-
-	got := captureStdout(func() {
-		err := cmdSearch(vaultDir, map[string]string{"query": "Architecture"}, "tsv")
-		if err != nil {
-			t.Fatalf("cmdSearch error: %v", err)
-		}
-	})
-
-	lines := strings.Split(strings.TrimSpace(got), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 lines (header + result), got %d: %q", len(lines), got)
-	}
-	if lines[0] != "title\tpath" {
-		t.Errorf("header = %q, want %q", lines[0], "title\tpath")
-	}
-	if !strings.Contains(lines[1], "Architecture") {
-		t.Errorf("result should contain 'Architecture': %q", lines[1])
-	}
-	if !strings.Contains(lines[1], "\t") {
-		t.Errorf("result should be tab-separated: %q", lines[1])
-	}
-}
-
-func TestOrphansTSVIntegration(t *testing.T) {
-	vaultDir := t.TempDir()
-	os.WriteFile(filepath.Join(vaultDir, "Orphan.md"), []byte("# Orphan\nNo links to me."), 0644)
-	os.WriteFile(filepath.Join(vaultDir, "Linked.md"), []byte("# Linked\nSee [[Linked]] here."), 0644)
-
-	got := captureStdout(func() {
-		err := cmdOrphans(vaultDir, "tsv")
-		if err != nil {
-			t.Fatalf("cmdOrphans error: %v", err)
-		}
-	})
-
-	lines := strings.Split(strings.TrimSpace(got), "\n")
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 lines (header + orphan), got %d: %q", len(lines), got)
-	}
-	if lines[0] != "file" {
-		t.Errorf("header = %q, want %q", lines[0], "file")
-	}
-	foundOrphan := false
-	for _, line := range lines[1:] {
-		if strings.Contains(line, "Orphan.md") {
-			foundOrphan = true
-		}
-	}
-	if !foundOrphan {
-		t.Errorf("orphans TSV output should contain Orphan.md: %q", got)
-	}
-}
-
-func TestOrphansTreeIntegration(t *testing.T) {
-	vaultDir := t.TempDir()
-	os.MkdirAll(filepath.Join(vaultDir, "folder"), 0755)
-	os.WriteFile(filepath.Join(vaultDir, "folder", "Orphan A.md"), []byte("# Orphan A"), 0644)
-	os.WriteFile(filepath.Join(vaultDir, "Orphan B.md"), []byte("# Orphan B"), 0644)
-	// This note links to itself, so it is still an orphan (self-links don't count as incoming)
-	os.WriteFile(filepath.Join(vaultDir, "folder", "Linked.md"), []byte("# Linked\n[[Linked]]"), 0644)
-
-	got := captureStdout(func() {
-		err := cmdOrphans(vaultDir, "tree")
-		if err != nil {
-			t.Fatalf("cmdOrphans error: %v", err)
-		}
-	})
-
-	if !strings.Contains(got, "Orphan A.md") {
-		t.Errorf("tree orphans output missing 'Orphan A.md': %q", got)
-	}
-	if !strings.Contains(got, "Orphan B.md") {
-		t.Errorf("tree orphans output missing 'Orphan B.md': %q", got)
-	}
-	// Verify it has tree structure (box-drawing characters)
-	if !strings.Contains(got, "\u2514") && !strings.Contains(got, "\u251c") {
-		t.Errorf("tree output missing Unicode box-drawing characters: %q", got)
 	}
 }

@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"encoding/json"
@@ -134,11 +134,14 @@ func removeFromItems(items *[]bookmark, path string) bool {
 	return false
 }
 
-// cmdBookmarks lists all bookmarked file paths (flat, recursing into groups).
-func cmdBookmarks(vaultDir string, format string) error {
-	bm, err := loadBookmarks(vaultDir)
+// Bookmarks lists all bookmarked file paths (flat, recursing into groups).
+func (v *Vault) Bookmarks() ([]string, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	bm, err := loadBookmarks(v.dir)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	paths := flattenBookmarks(bm.Items)
@@ -146,69 +149,63 @@ func cmdBookmarks(vaultDir string, format string) error {
 		paths = []string{}
 	}
 
-	formatList(paths, format)
-	return nil
+	return paths, nil
 }
 
-// cmdBookmarksAdd adds a bookmark for a note resolved by title.
-func cmdBookmarksAdd(vaultDir string, params map[string]string) error {
-	title := params["file"]
-	if title == "" {
-		return fmt.Errorf("bookmarks:add requires file=\"<title>\"")
+// BookmarksAdd adds a bookmark for a note resolved by title.
+// Returns a human-readable message (e.g. "bookmarked: path" or "already bookmarked: path").
+func (v *Vault) BookmarksAdd(title string) (string, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	notePath, err := resolveNote(v.dir, title)
+	if err != nil {
+		return "", err
 	}
 
-	notePath, err := resolveNote(vaultDir, title)
+	relPath, err := filepath.Rel(v.dir, notePath)
 	if err != nil {
-		return err
+		return "", err
 	}
 
-	relPath, err := filepath.Rel(vaultDir, notePath)
+	bm, err := loadBookmarks(v.dir)
 	if err != nil {
-		return err
-	}
-
-	bm, err := loadBookmarks(vaultDir)
-	if err != nil {
-		return err
+		return "", err
 	}
 
 	if !addBookmark(&bm, relPath) {
-		fmt.Printf("already bookmarked: %s\n", relPath)
-		return nil
+		return fmt.Sprintf("already bookmarked: %s", relPath), nil
 	}
 
-	if err := saveBookmarks(vaultDir, &bm); err != nil {
-		return err
+	if err := saveBookmarks(v.dir, &bm); err != nil {
+		return "", err
 	}
 
-	fmt.Printf("bookmarked: %s\n", relPath)
-	return nil
+	return fmt.Sprintf("bookmarked: %s", relPath), nil
 }
 
-// cmdBookmarksRemove removes a bookmark for a note resolved by title.
-func cmdBookmarksRemove(vaultDir string, params map[string]string) error {
-	title := params["file"]
-	if title == "" {
-		return fmt.Errorf("bookmarks:remove requires file=\"<title>\"")
-	}
+// BookmarksRemove removes a bookmark for a note resolved by title.
+func (v *Vault) BookmarksRemove(title string) error {
+	v.mu.Lock()
+	defer v.mu.Unlock()
 
 	// Check that bookmarks.json exists (error on remove when missing)
-	bmPath := bookmarksPath(vaultDir)
+	bmPath := bookmarksPath(v.dir)
 	if _, err := os.Stat(bmPath); os.IsNotExist(err) {
 		return fmt.Errorf("no bookmarks file found in vault")
 	}
 
-	notePath, err := resolveNote(vaultDir, title)
+	notePath, err := resolveNote(v.dir, title)
 	if err != nil {
 		return err
 	}
 
-	relPath, err := filepath.Rel(vaultDir, notePath)
+	relPath, err := filepath.Rel(v.dir, notePath)
 	if err != nil {
 		return err
 	}
 
-	bm, err := loadBookmarks(vaultDir)
+	bm, err := loadBookmarks(v.dir)
 	if err != nil {
 		return err
 	}
@@ -217,10 +214,5 @@ func cmdBookmarksRemove(vaultDir string, params map[string]string) error {
 		return fmt.Errorf("bookmark not found for %q (%s)", title, relPath)
 	}
 
-	if err := saveBookmarks(vaultDir, &bm); err != nil {
-		return err
-	}
-
-	fmt.Printf("unbookmarked: %s\n", relPath)
-	return nil
+	return saveBookmarks(v.dir, &bm)
 }

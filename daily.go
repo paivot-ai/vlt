@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"encoding/json"
@@ -8,6 +8,13 @@ import (
 	"strings"
 	"time"
 )
+
+// DailyResult is returned by Daily and reports what happened.
+type DailyResult struct {
+	RelPath string // vault-relative path of the daily note
+	Content string // file content (if the note already existed)
+	Created bool   // true if a new note was created
+}
 
 // dailyConfig holds the daily note configuration.
 type dailyConfig struct {
@@ -51,7 +58,7 @@ func parseDailyJSON(data []byte, config *dailyConfig) {
 		config.Folder = folder
 	}
 	if format, ok := raw["format"].(string); ok && format != "" {
-		config.Format = momentToGoFormat(format)
+		config.Format = MomentToGoFormat(format)
 	}
 	if template, ok := raw["template"].(string); ok && template != "" {
 		config.Template = template
@@ -63,7 +70,7 @@ func parseDailyJSON(data []byte, config *dailyConfig) {
 			config.Folder = folder
 		}
 		if format, ok := daily["format"].(string); ok && format != "" {
-			config.Format = momentToGoFormat(format)
+			config.Format = MomentToGoFormat(format)
 		}
 		if template, ok := daily["template"].(string); ok && template != "" {
 			config.Template = template
@@ -71,10 +78,10 @@ func parseDailyJSON(data []byte, config *dailyConfig) {
 	}
 }
 
-// momentToGoFormat translates common Moment.js date format tokens to Go's
+// MomentToGoFormat translates common Moment.js date format tokens to Go's
 // reference time format. Uses a two-pass approach with placeholders to avoid
 // earlier replacements being corrupted by later ones (e.g., "a" inside "January").
-func momentToGoFormat(moment string) string {
+func MomentToGoFormat(moment string) string {
 	// Order matters: longest tokens first to avoid partial matches
 	replacements := []struct {
 		moment string
@@ -115,18 +122,22 @@ func momentToGoFormat(moment string) string {
 	return result
 }
 
-// cmdDaily creates or reads a daily note.
-// With no date= parameter, uses today. With date="2025-01-15", uses that date.
-func cmdDaily(vaultDir string, params map[string]string) error {
-	config := loadDailyConfig(vaultDir)
+// Daily creates or reads a daily note.
+// With no date parameter (empty string), uses today.
+// With date="2025-01-15", uses that date.
+func (v *Vault) Daily(dateStr string) (DailyResult, error) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	config := loadDailyConfig(v.dir)
 
 	// Determine the date
 	var date time.Time
-	if dateStr := params["date"]; dateStr != "" {
+	if dateStr != "" {
 		var err error
 		date, err = time.Parse("2006-01-02", dateStr)
 		if err != nil {
-			return fmt.Errorf("invalid date format %q, expected YYYY-MM-DD", dateStr)
+			return DailyResult{}, fmt.Errorf("invalid date format %q, expected YYYY-MM-DD", dateStr)
 		}
 	} else {
 		date = time.Now()
@@ -139,18 +150,21 @@ func cmdDaily(vaultDir string, params map[string]string) error {
 		relPath = filepath.Join(config.Folder, filename)
 	}
 
-	fullPath := filepath.Join(vaultDir, relPath)
+	fullPath := filepath.Join(v.dir, relPath)
 
-	// If note exists, read and print it
+	// If note exists, read and return it
 	if data, err := os.ReadFile(fullPath); err == nil {
-		fmt.Print(string(data))
-		return nil
+		return DailyResult{
+			RelPath: relPath,
+			Content: string(data),
+			Created: false,
+		}, nil
 	}
 
 	// Note doesn't exist -- create it
 	var content string
 	if config.Template != "" {
-		tmplPath := filepath.Join(vaultDir, config.Template)
+		tmplPath := filepath.Join(v.dir, config.Template)
 		if !strings.HasSuffix(tmplPath, ".md") {
 			tmplPath += ".md"
 		}
@@ -168,13 +182,16 @@ func cmdDaily(vaultDir string, params map[string]string) error {
 
 	// Ensure parent directory exists
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
-		return err
+		return DailyResult{}, err
 	}
 
 	if err := os.WriteFile(fullPath, []byte(content), 0644); err != nil {
-		return err
+		return DailyResult{}, err
 	}
 
-	fmt.Printf("created: %s\n", relPath)
-	return nil
+	return DailyResult{
+		RelPath: relPath,
+		Content: content,
+		Created: true,
+	}, nil
 }

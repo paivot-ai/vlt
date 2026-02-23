@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"os"
@@ -56,7 +56,7 @@ func TestParseInlineTags(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := parseInlineTags(tt.text)
+			got := ParseInlineTags(tt.text)
 
 			if tt.want == nil {
 				if len(got) != 0 {
@@ -80,7 +80,7 @@ func TestParseInlineTags(t *testing.T) {
 func TestAllNoteTags(t *testing.T) {
 	text := "---\ntags: [project, important]\n---\n\n# My Note\n\nSome #inline-tag and #project again.\n"
 
-	got := allNoteTags(text)
+	got := AllNoteTags(text)
 
 	// Should have: project, important, inline-tag (project deduplicated)
 	want := map[string]bool{"project": true, "important": true, "inline-tag": true}
@@ -98,7 +98,7 @@ func TestAllNoteTags(t *testing.T) {
 func TestAllNoteTags_CaseInsensitive(t *testing.T) {
 	text := "---\ntags: [Project]\n---\n\n#project again\n"
 
-	got := allNoteTags(text)
+	got := AllNoteTags(text)
 
 	if len(got) != 1 {
 		t.Fatalf("got %d tags %v, want 1 (case-insensitive dedup)", len(got), got)
@@ -111,14 +111,14 @@ func TestAllNoteTags_CaseInsensitive(t *testing.T) {
 func TestAllNoteTags_NoFrontmatter(t *testing.T) {
 	text := "# My Note\n\nJust #inline tags here.\n"
 
-	got := allNoteTags(text)
+	got := AllNoteTags(text)
 
 	if len(got) != 1 || got[0] != "inline" {
 		t.Errorf("got %v, want [inline]", got)
 	}
 }
 
-func TestCmdTags(t *testing.T) {
+func TestTags(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	os.WriteFile(
@@ -138,14 +138,35 @@ func TestCmdTags(t *testing.T) {
 		0644,
 	)
 
-	// Just verify no error
-	params := map[string]string{}
-	if err := cmdTags(vaultDir, params, true, ""); err != nil {
-		t.Fatalf("tags: %v", err)
+	v := &Vault{dir: vaultDir}
+	tags, counts, err := v.Tags("")
+	if err != nil {
+		t.Fatalf("Tags: %v", err)
+	}
+
+	if len(tags) == 0 {
+		t.Fatal("expected at least one tag")
+	}
+
+	// project appears in both notes
+	if counts["project"] != 2 {
+		t.Errorf("project count = %d, want 2", counts["project"])
+	}
+	// important only in note1
+	if counts["important"] != 1 {
+		t.Errorf("important count = %d, want 1", counts["important"])
+	}
+	// review only in note2
+	if counts["review"] != 1 {
+		t.Errorf("review count = %d, want 1", counts["review"])
+	}
+	// hidden-tag should not appear (inside .obsidian)
+	if counts["hidden-tag"] != 0 {
+		t.Errorf("hidden-tag should be skipped, got count %d", counts["hidden-tag"])
 	}
 }
 
-func TestCmdTag(t *testing.T) {
+func TestTag(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	os.MkdirAll(filepath.Join(vaultDir, "methodology"), 0755)
@@ -161,20 +182,28 @@ func TestCmdTag(t *testing.T) {
 		0644,
 	)
 
+	v := &Vault{dir: vaultDir}
+
 	// Exact match
-	params := map[string]string{"tag": "project/backend"}
-	if err := cmdTag(vaultDir, params, ""); err != nil {
-		t.Fatalf("tag exact: %v", err)
+	files, err := v.Tag("project/backend")
+	if err != nil {
+		t.Fatalf("Tag exact: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("Tag exact: got %d files, want 1", len(files))
 	}
 
 	// Hierarchical match: #project should find #project/backend
-	params = map[string]string{"tag": "project"}
-	if err := cmdTag(vaultDir, params, ""); err != nil {
-		t.Fatalf("tag hierarchical: %v", err)
+	files, err = v.Tag("project")
+	if err != nil {
+		t.Fatalf("Tag hierarchical: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("Tag hierarchical: got %d files, want 1", len(files))
 	}
 }
 
-func TestCmdTag_StripHash(t *testing.T) {
+func TestTag_StripHash(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	os.WriteFile(
@@ -183,9 +212,14 @@ func TestCmdTag_StripHash(t *testing.T) {
 		0644,
 	)
 
+	v := &Vault{dir: vaultDir}
+
 	// User passes #meeting with hash prefix -- should still work
-	params := map[string]string{"tag": "#meeting"}
-	if err := cmdTag(vaultDir, params, ""); err != nil {
-		t.Fatalf("tag with hash: %v", err)
+	files, err := v.Tag("#meeting")
+	if err != nil {
+		t.Fatalf("Tag with hash: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("Tag with hash: got %d files, want 1", len(files))
 	}
 }

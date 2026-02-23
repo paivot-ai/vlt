@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package vlt
 
 import (
 	"os"
@@ -23,8 +23,8 @@ const (
 	lockfileExclusiveLock = 0x00000002
 )
 
-func lockVault(vaultDir string, exclusive bool) (func(), error) {
-	p := filepath.Join(vaultDir, lockFileName)
+func LockVault(vaultDir string, exclusive bool) (func(), error) {
+	p := filepath.Join(vaultDir, LockFileName)
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
 		return nil, err

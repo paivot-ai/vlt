@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"encoding/json"
@@ -6,7 +6,39 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+// Vault represents an opened Obsidian vault. It carries the vault root
+// directory and a mutex for goroutine-safe operations.
+type Vault struct {
+	dir string
+	mu  sync.RWMutex
+}
+
+// Open opens a vault at the given directory path, validating that it exists.
+func Open(dir string) (*Vault, error) {
+	dir, err := validateVaultDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	return &Vault{dir: dir}, nil
+}
+
+// OpenByName resolves a vault by name (or path) via the Obsidian config
+// and returns an opened Vault.
+func OpenByName(name string) (*Vault, error) {
+	dir, err := resolveVault(name)
+	if err != nil {
+		return nil, err
+	}
+	return &Vault{dir: dir}, nil
+}
+
+// Dir returns the vault root directory path.
+func (v *Vault) Dir() string {
+	return v.dir
+}
 
 // obsidianConfig is the top-level structure of Obsidian's config file.
 type obsidianConfig struct {
@@ -34,7 +66,7 @@ func resolveVault(name string) (string, error) {
 	}
 
 	// Look up by name
-	vaults, err := discoverVaults()
+	vaults, err := DiscoverVaults()
 	if err != nil {
 		// Fall back to VLT_VAULT_PATH env var
 		if p := os.Getenv("VLT_VAULT_PATH"); p != "" {
@@ -66,9 +98,9 @@ func validateVaultDir(path string) (string, error) {
 	return path, nil
 }
 
-// discoverVaults reads the Obsidian config file and returns a map of
+// DiscoverVaults reads the Obsidian config file and returns a map of
 // vault name (directory basename) to absolute path.
-func discoverVaults() (map[string]string, error) {
+func DiscoverVaults() (map[string]string, error) {
 	configPath := obsidianConfigPath()
 
 	data, err := os.ReadFile(configPath)
@@ -147,9 +179,9 @@ func resolveNote(vaultDir, title string) (string, error) {
 			return nil
 		}
 
-		yaml, _, hasFM := extractFrontmatter(string(data))
+		yaml, _, hasFM := ExtractFrontmatter(string(data))
 		if hasFM {
-			for _, alias := range frontmatterGetList(yaml, "aliases") {
+			for _, alias := range FrontmatterGetList(yaml, "aliases") {
 				if strings.EqualFold(alias, title) {
 					found = path
 					return filepath.SkipAll

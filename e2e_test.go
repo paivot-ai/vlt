@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"fmt"
@@ -32,26 +32,19 @@ func TestE2EWriteThenReadHeading(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
+	v := &Vault{dir: vaultDir}
+
 	// Step 2: Write new body content preserving frontmatter
 	newBody := "# Design Document v2\n\nRevised overview.\n\n## Architecture\n\nMonolithic with clean architecture layers.\n\n## Testing Strategy\n\nProperty-based testing throughout.\n"
-	writeParams := map[string]string{
-		"file":    "Design Doc",
-		"content": newBody,
-	}
-	if err := cmdWrite(vaultDir, writeParams, false); err != nil {
+	if err := v.Write("Design Doc", newBody, false); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	// Step 3: Read the Architecture section via heading=
-	readOut := captureStdout(func() {
-		readParams := map[string]string{
-			"file":    "Design Doc",
-			"heading": "## Architecture",
-		}
-		if err := cmdRead(vaultDir, readParams); err != nil {
-			t.Fatalf("read heading: %v", err)
-		}
-	})
+	// Step 3: Read the Architecture section via heading
+	readOut, err := v.Read("Design Doc", "## Architecture")
+	if err != nil {
+		t.Fatalf("read heading: %v", err)
+	}
 
 	// Verify: section content is from the NEW body
 	if !strings.Contains(readOut, "## Architecture") {
@@ -76,18 +69,18 @@ func TestE2EWriteThenReadHeading(t *testing.T) {
 	}
 	got := string(data)
 
-	yaml, _, hasFM := extractFrontmatter(got)
+	yaml, _, hasFM := ExtractFrontmatter(got)
 	if !hasFM {
 		t.Fatal("frontmatter lost after write")
 	}
-	if v, ok := frontmatterGetValue(yaml, "type"); !ok || v != "methodology" {
-		t.Errorf("type property lost or changed: %q", v)
+	if fv, ok := FrontmatterGetValue(yaml, "type"); !ok || fv != "methodology" {
+		t.Errorf("type property lost or changed: %q", fv)
 	}
-	if v, ok := frontmatterGetValue(yaml, "status"); !ok || v != "active" {
-		t.Errorf("status property lost or changed: %q", v)
+	if fv, ok := FrontmatterGetValue(yaml, "status"); !ok || fv != "active" {
+		t.Errorf("status property lost or changed: %q", fv)
 	}
-	if v, ok := frontmatterGetValue(yaml, "created"); !ok || v != "2026-02-19" {
-		t.Errorf("created property lost or changed: %q", v)
+	if fv, ok := FrontmatterGetValue(yaml, "created"); !ok || fv != "2026-02-19" {
+		t.Errorf("created property lost or changed: %q", fv)
 	}
 }
 
@@ -104,26 +97,21 @@ func TestE2EPatchThenReadHeading(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
+	v := &Vault{dir: vaultDir}
+
 	// Step 2: Patch the Decision section by heading
-	patchParams := map[string]string{
-		"file":    "ADR-001",
-		"heading": "## Decision",
-		"content": "\nWe chose SQLite for embedded simplicity. No external dependencies required.\n",
-	}
-	if err := cmdPatch(vaultDir, patchParams, false, false); err != nil {
+	if err := v.Patch("ADR-001", PatchOptions{
+		Heading: "## Decision",
+		Content: "\nWe chose SQLite for embedded simplicity. No external dependencies required.\n",
+	}); err != nil {
 		t.Fatalf("patch: %v", err)
 	}
 
-	// Step 3: Read the Decision section via heading=
-	readOut := captureStdout(func() {
-		readParams := map[string]string{
-			"file":    "ADR-001",
-			"heading": "## Decision",
-		}
-		if err := cmdRead(vaultDir, readParams); err != nil {
-			t.Fatalf("read heading: %v", err)
-		}
-	})
+	// Step 3: Read the Decision section via heading
+	readOut, err := v.Read("ADR-001", "## Decision")
+	if err != nil {
+		t.Fatalf("read heading: %v", err)
+	}
 
 	// Verify patched content is returned
 	if !strings.Contains(readOut, "SQLite for embedded simplicity") {
@@ -146,12 +134,12 @@ func TestE2EPatchThenReadHeading(t *testing.T) {
 	}
 
 	// Verify frontmatter preserved
-	yaml, _, hasFM := extractFrontmatter(got)
+	yaml, _, hasFM := ExtractFrontmatter(got)
 	if !hasFM {
 		t.Fatal("frontmatter lost after patch")
 	}
-	if v, ok := frontmatterGetValue(yaml, "status"); !ok || v != "draft" {
-		t.Errorf("status property lost or changed: %q", v)
+	if fv, ok := FrontmatterGetValue(yaml, "status"); !ok || fv != "draft" {
+		t.Errorf("status property lost or changed: %q", fv)
 	}
 }
 
@@ -168,38 +156,41 @@ func TestE2EPatchDeleteThenSearch(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
+	v := &Vault{dir: vaultDir}
+
 	// Step 2: Verify the content exists before deletion
-	preSearchOut := captureStdout(func() {
-		searchParams := map[string]string{"query": "thundering herd"}
-		if err := cmdSearch(vaultDir, searchParams, ""); err != nil {
-			t.Fatalf("pre-search: %v", err)
+	preResults, err := v.Search(SearchOptions{Query: "thundering herd"})
+	if err != nil {
+		t.Fatalf("pre-search: %v", err)
+	}
+	found := false
+	for _, r := range preResults {
+		if r.Title == "Retry Pattern" {
+			found = true
+			break
 		}
-	})
-	if !strings.Contains(preSearchOut, "Retry Pattern") {
+	}
+	if !found {
 		t.Fatal("content should be findable before deletion")
 	}
 
 	// Step 3: Delete the Deprecated Approach section
-	deleteParams := map[string]string{
-		"file":    "Retry Pattern",
-		"heading": "## Deprecated Approach",
-	}
-	if err := cmdPatch(vaultDir, deleteParams, true, false); err != nil {
+	if err := v.Patch("Retry Pattern", PatchOptions{
+		Heading: "## Deprecated Approach",
+		Delete:  true,
+	}); err != nil {
 		t.Fatalf("patch delete: %v", err)
 	}
 
 	// Step 4: Search for deleted content -- should NOT be found
-	postSearchOut := captureStdout(func() {
-		searchParams := map[string]string{"query": "thundering herd"}
-		if err := cmdSearch(vaultDir, searchParams, ""); err != nil {
-			t.Fatalf("post-search: %v", err)
-		}
-	})
-	if strings.Contains(postSearchOut, "thundering herd") {
-		t.Error("deleted content still found by search")
+	postResults, err := v.Search(SearchOptions{Query: "thundering herd"})
+	if err != nil {
+		t.Fatalf("post-search: %v", err)
 	}
-	if strings.Contains(postSearchOut, "Retry Pattern") {
-		t.Error("note should not match after deleted content is gone")
+	for _, r := range postResults {
+		if strings.Contains(r.Title, "Retry Pattern") {
+			t.Error("note should not match after deleted content is gone")
+		}
 	}
 
 	// Step 5: Verify other sections are intact
@@ -234,37 +225,55 @@ func TestE2ESearchContextMultipleNotes(t *testing.T) {
 	os.WriteFile(filepath.Join(vaultDir, "decisions", "Database Choice.md"), []byte(note2), 0644)
 	os.WriteFile(filepath.Join(vaultDir, "Internal Service.md"), []byte(note3), 0644)
 
+	v := &Vault{dir: vaultDir}
+
 	// Search for "gateway" with context=2
-	out := captureStdout(func() {
-		params := map[string]string{"query": "gateway", "context": "2"}
-		if err := cmdSearch(vaultDir, params, ""); err != nil {
-			t.Fatalf("search with context: %v", err)
-		}
-	})
+	matches, err := v.SearchWithContext(SearchOptions{Query: "gateway", ContextN: 2})
+	if err != nil {
+		t.Fatalf("search with context: %v", err)
+	}
+
+	// Collect all file paths from matches
+	filesSeen := make(map[string]bool)
+	var allContext []string
+	for _, m := range matches {
+		filesSeen[m.File] = true
+		allContext = append(allContext, m.Context...)
+		allContext = append(allContext, m.Match)
+	}
 
 	// All files with "gateway" should appear in output
-	if !strings.Contains(out, "API Gateway.md") {
-		t.Error("API Gateway note missing from context search results")
+	if !filesSeen["patterns/API Gateway.md"] {
+		// API Gateway also matches by title, check for title-match entry
+		hasAPIGateway := false
+		for _, m := range matches {
+			if strings.Contains(m.File, "API Gateway") {
+				hasAPIGateway = true
+				break
+			}
+		}
+		if !hasAPIGateway {
+			t.Error("API Gateway note missing from context search results")
+		}
 	}
-	if !strings.Contains(out, "Database Choice.md") {
+	if !filesSeen["decisions/Database Choice.md"] {
 		t.Error("Database Choice note missing from context search results")
 	}
-	if !strings.Contains(out, "Internal Service.md") {
+	if !filesSeen["Internal Service.md"] {
 		t.Error("Internal Service note missing from context search results")
 	}
 
 	// Context lines should be present (2 lines before/after match)
-	// For API Gateway: "Authentication is delegated to the gateway." is line 5
-	// Context should include lines 3 and 4 before, lines 6 and 7 after
-	if !strings.Contains(out, "rate limiting") {
+	allText := strings.Join(allContext, "\n")
+	if !strings.Contains(allText, "rate limiting") {
 		t.Error("context lines before gateway match missing in API Gateway")
 	}
-	if !strings.Contains(out, "Compression") {
+	if !strings.Contains(allText, "Compression") {
 		t.Error("context lines after gateway match missing in API Gateway")
 	}
 
 	// For Internal Service: "no gateway dependency" should show surrounding lines
-	if !strings.Contains(out, "gRPC") {
+	if !strings.Contains(allText, "gRPC") {
 		t.Error("context lines after gateway match missing in Internal Service")
 	}
 }
@@ -285,43 +294,61 @@ func TestE2ESearchRegexAcrossVault(t *testing.T) {
 	os.WriteFile(filepath.Join(vaultDir, "projects", "Beta.md"), []byte(note2), 0644)
 	os.WriteFile(filepath.Join(vaultDir, "Meeting Notes.md"), []byte(note3), 0644)
 
+	v := &Vault{dir: vaultDir}
+
 	// Search for date pattern with regex
-	out := captureStdout(func() {
-		params := map[string]string{"regex": `\d{4}-\d{2}-\d{2}`}
-		if err := cmdSearch(vaultDir, params, ""); err != nil {
-			t.Fatalf("regex search: %v", err)
-		}
-	})
+	results, err := v.Search(SearchOptions{Regex: `\d{4}-\d{2}-\d{2}`})
+	if err != nil {
+		t.Fatalf("regex search: %v", err)
+	}
+
+	// Collect titles from results
+	titles := make(map[string]bool)
+	for _, r := range results {
+		titles[r.Title] = true
+	}
 
 	// Alpha and Beta should match (both have dates)
-	if !strings.Contains(out, "Alpha") {
+	if !titles["Alpha"] {
 		t.Error("Alpha note missing from regex date search")
 	}
-	if !strings.Contains(out, "Beta") {
+	if !titles["Beta"] {
 		t.Error("Beta note missing from regex date search")
 	}
 
 	// Meeting Notes should NOT match (no dates)
-	if strings.Contains(out, "Meeting Notes") {
+	if titles["Meeting Notes"] {
 		t.Error("Meeting Notes should not match date regex")
 	}
 
 	// Search for regex with context to verify match detail
-	ctxOut := captureStdout(func() {
-		params := map[string]string{"regex": `2026-03-\d{2}`, "context": "1"}
-		if err := cmdSearch(vaultDir, params, ""); err != nil {
-			t.Fatalf("regex with context: %v", err)
-		}
-	})
+	ctxMatches, err := v.SearchWithContext(SearchOptions{Regex: `2026-03-\d{2}`, ContextN: 1})
+	if err != nil {
+		t.Fatalf("regex with context: %v", err)
+	}
 
 	// Only Alpha has 2026-03-XX
-	if !strings.Contains(ctxOut, "Alpha.md") {
+	hasAlpha := false
+	hasBeta := false
+	hasDeadlineDate := false
+	for _, m := range ctxMatches {
+		if strings.Contains(m.File, "Alpha") {
+			hasAlpha = true
+		}
+		if strings.Contains(m.File, "Beta") {
+			hasBeta = true
+		}
+		if strings.Contains(m.Match, "2026-03-30") {
+			hasDeadlineDate = true
+		}
+	}
+	if !hasAlpha {
 		t.Error("Alpha should match 2026-03 pattern")
 	}
-	if !strings.Contains(ctxOut, "2026-03-30") {
+	if !hasDeadlineDate {
 		t.Error("deadline date should appear in output")
 	}
-	if strings.Contains(ctxOut, "Beta") {
+	if hasBeta {
 		t.Error("Beta should not match 2026-03 pattern")
 	}
 
@@ -329,14 +356,19 @@ func TestE2ESearchRegexAcrossVault(t *testing.T) {
 	noteWithURL := "# Resources\n\nSee https://example.com/docs for info.\nAlso check http://internal.local/api.\nNo other links.\n"
 	os.WriteFile(filepath.Join(vaultDir, "Resources.md"), []byte(noteWithURL), 0644)
 
-	urlOut := captureStdout(func() {
-		params := map[string]string{"regex": `https?://[^\s]+`}
-		if err := cmdSearch(vaultDir, params, ""); err != nil {
-			t.Fatalf("URL regex search: %v", err)
-		}
-	})
+	urlResults, err := v.Search(SearchOptions{Regex: `https?://[^\s]+`})
+	if err != nil {
+		t.Fatalf("URL regex search: %v", err)
+	}
 
-	if !strings.Contains(urlOut, "Resources") {
+	hasResources := false
+	for _, r := range urlResults {
+		if r.Title == "Resources" {
+			hasResources = true
+			break
+		}
+	}
+	if !hasResources {
 		t.Error("Resources note should match URL regex")
 	}
 }
@@ -348,27 +380,26 @@ func TestE2ESearchRegexAcrossVault(t *testing.T) {
 func TestE2ETimestampsFullWorkflow(t *testing.T) {
 	vaultDir := t.TempDir()
 
+	v := &Vault{dir: vaultDir}
+
 	// Step 1: Create note with timestamps
-	createParams := map[string]string{
-		"name":    "Evolving Note",
-		"path":    "Evolving Note.md",
-		"content": "---\ntype: concept\nstatus: draft\n---\n\n# Evolving Concept\n\nInitial thoughts.\n",
-	}
-	if err := cmdCreate(vaultDir, createParams, true, true); err != nil {
+	if err := v.Create("Evolving Note", "Evolving Note.md",
+		"---\ntype: concept\nstatus: draft\n---\n\n# Evolving Concept\n\nInitial thoughts.\n",
+		true, true); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
 	// Read and verify created_at and updated_at are set
 	data, _ := os.ReadFile(filepath.Join(vaultDir, "Evolving Note.md"))
-	yaml1, _, hasFM := extractFrontmatter(string(data))
+	yaml1, _, hasFM := ExtractFrontmatter(string(data))
 	if !hasFM {
 		t.Fatal("no frontmatter after create")
 	}
-	createdAt1, ok := frontmatterGetValue(yaml1, "created_at")
+	createdAt1, ok := FrontmatterGetValue(yaml1, "created_at")
 	if !ok || createdAt1 == "" {
 		t.Fatal("created_at not set on create")
 	}
-	updatedAt1, ok := frontmatterGetValue(yaml1, "updated_at")
+	updatedAt1, ok := FrontmatterGetValue(yaml1, "updated_at")
 	if !ok || updatedAt1 == "" {
 		t.Fatal("updated_at not set on create")
 	}
@@ -377,18 +408,14 @@ func TestE2ETimestampsFullWorkflow(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 
 	// Step 2: Append with timestamps
-	appendParams := map[string]string{
-		"file":    "Evolving Note",
-		"content": "\nAppended insight.\n",
-	}
-	if err := cmdAppend(vaultDir, appendParams, true); err != nil {
+	if err := v.Append("Evolving Note", "\nAppended insight.\n", true); err != nil {
 		t.Fatalf("append: %v", err)
 	}
 
 	data, _ = os.ReadFile(filepath.Join(vaultDir, "Evolving Note.md"))
-	yaml2, _, _ := extractFrontmatter(string(data))
-	createdAt2, _ := frontmatterGetValue(yaml2, "created_at")
-	updatedAt2, _ := frontmatterGetValue(yaml2, "updated_at")
+	yaml2, _, _ := ExtractFrontmatter(string(data))
+	createdAt2, _ := FrontmatterGetValue(yaml2, "created_at")
+	updatedAt2, _ := FrontmatterGetValue(yaml2, "updated_at")
 
 	// created_at must be unchanged
 	if createdAt2 != createdAt1 {
@@ -402,18 +429,14 @@ func TestE2ETimestampsFullWorkflow(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 
 	// Step 3: Write with timestamps (replace body)
-	writeParams := map[string]string{
-		"file":    "Evolving Note",
-		"content": "# Evolved Concept\n\nMature understanding of the topic.\n",
-	}
-	if err := cmdWrite(vaultDir, writeParams, true); err != nil {
+	if err := v.Write("Evolving Note", "# Evolved Concept\n\nMature understanding of the topic.\n", true); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
 	data, _ = os.ReadFile(filepath.Join(vaultDir, "Evolving Note.md"))
-	yaml3, _, _ := extractFrontmatter(string(data))
-	createdAt3, _ := frontmatterGetValue(yaml3, "created_at")
-	updatedAt3, _ := frontmatterGetValue(yaml3, "updated_at")
+	yaml3, _, _ := ExtractFrontmatter(string(data))
+	createdAt3, _ := FrontmatterGetValue(yaml3, "created_at")
+	updatedAt3, _ := FrontmatterGetValue(yaml3, "updated_at")
 
 	if createdAt3 != createdAt1 {
 		t.Errorf("created_at changed after write: %q -> %q", createdAt1, createdAt3)
@@ -426,29 +449,24 @@ func TestE2ETimestampsFullWorkflow(t *testing.T) {
 
 	// Step 4: Patch with timestamps (add a section heading for patching)
 	// First, write body with a section we can patch
-	writeParams2 := map[string]string{
-		"file":    "Evolving Note",
-		"content": "# Evolved Concept\n\nMature understanding.\n\n## Details\n\nOriginal details.\n",
-	}
-	if err := cmdWrite(vaultDir, writeParams2, false); err != nil {
+	if err := v.Write("Evolving Note", "# Evolved Concept\n\nMature understanding.\n\n## Details\n\nOriginal details.\n", false); err != nil {
 		t.Fatalf("write for patch setup: %v", err)
 	}
 
 	time.Sleep(1100 * time.Millisecond)
 
-	patchParams := map[string]string{
-		"file":    "Evolving Note",
-		"heading": "## Details",
-		"content": "\nRefined details after review.\n",
-	}
-	if err := cmdPatch(vaultDir, patchParams, false, true); err != nil {
+	if err := v.Patch("Evolving Note", PatchOptions{
+		Heading:    "## Details",
+		Content:    "\nRefined details after review.\n",
+		Timestamps: true,
+	}); err != nil {
 		t.Fatalf("patch: %v", err)
 	}
 
 	data, _ = os.ReadFile(filepath.Join(vaultDir, "Evolving Note.md"))
-	yaml4, _, _ := extractFrontmatter(string(data))
-	createdAt4, _ := frontmatterGetValue(yaml4, "created_at")
-	updatedAt4, _ := frontmatterGetValue(yaml4, "updated_at")
+	yaml4, _, _ := ExtractFrontmatter(string(data))
+	createdAt4, _ := FrontmatterGetValue(yaml4, "created_at")
+	updatedAt4, _ := FrontmatterGetValue(yaml4, "updated_at")
 
 	if createdAt4 != createdAt1 {
 		t.Errorf("created_at changed after patch: %q -> %q", createdAt1, createdAt4)
@@ -458,11 +476,11 @@ func TestE2ETimestampsFullWorkflow(t *testing.T) {
 	}
 
 	// Verify original properties preserved through entire workflow
-	if v, ok := frontmatterGetValue(yaml4, "type"); !ok || v != "concept" {
-		t.Errorf("type property lost: %q", v)
+	if fv, ok := FrontmatterGetValue(yaml4, "type"); !ok || fv != "concept" {
+		t.Errorf("type property lost: %q", fv)
 	}
-	if v, ok := frontmatterGetValue(yaml4, "status"); !ok || v != "draft" {
-		t.Errorf("status property lost: %q", v)
+	if fv, ok := FrontmatterGetValue(yaml4, "status"); !ok || fv != "draft" {
+		t.Errorf("status property lost: %q", fv)
 	}
 
 	// Verify final body content is correct
@@ -487,22 +505,20 @@ func TestE2EWritePreservesLinks(t *testing.T) {
 	os.WriteFile(filepath.Join(vaultDir, "Data Layer.md"), []byte(original), 0644)
 
 	// Verify initial backlinks
-	dbBacklinks, _ := findBacklinks(vaultDir, "Database")
+	dbBacklinks, _ := FindBacklinks(vaultDir, "Database")
 	if len(dbBacklinks) == 0 {
 		t.Fatal("Database should have backlinks before write")
 	}
-	cachingBacklinks, _ := findBacklinks(vaultDir, "Caching")
+	cachingBacklinks, _ := FindBacklinks(vaultDir, "Caching")
 	if len(cachingBacklinks) == 0 {
 		t.Fatal("Caching should have backlinks before write")
 	}
 
+	v := &Vault{dir: vaultDir}
+
 	// Write new body with link to Messaging instead
 	newBody := "# Data Layer v2\n\nWe now use [[Messaging]] for async communication.\nNo direct database or cache access.\n"
-	writeParams := map[string]string{
-		"file":    "Data Layer",
-		"content": newBody,
-	}
-	if err := cmdWrite(vaultDir, writeParams, false); err != nil {
+	if err := v.Write("Data Layer", newBody, false); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
@@ -521,7 +537,7 @@ func TestE2EWritePreservesLinks(t *testing.T) {
 	}
 
 	// Check backlinks are updated
-	dbBacklinksAfter, _ := findBacklinks(vaultDir, "Database")
+	dbBacklinksAfter, _ := FindBacklinks(vaultDir, "Database")
 	hasDLBacklink := false
 	for _, bl := range dbBacklinksAfter {
 		if strings.Contains(bl, "Data Layer") {
@@ -532,7 +548,7 @@ func TestE2EWritePreservesLinks(t *testing.T) {
 		t.Error("Database should not have Data Layer backlink after body replacement")
 	}
 
-	msgBacklinks, _ := findBacklinks(vaultDir, "Messaging")
+	msgBacklinks, _ := FindBacklinks(vaultDir, "Messaging")
 	hasNewBacklink := false
 	for _, bl := range msgBacklinks {
 		if strings.Contains(bl, "Data Layer") {
@@ -544,12 +560,12 @@ func TestE2EWritePreservesLinks(t *testing.T) {
 	}
 
 	// Frontmatter must be preserved
-	yaml, _, hasFM := extractFrontmatter(got)
+	yaml, _, hasFM := ExtractFrontmatter(got)
 	if !hasFM {
 		t.Fatal("frontmatter lost after write")
 	}
-	if v, ok := frontmatterGetValue(yaml, "type"); !ok || v != "pattern" {
-		t.Errorf("type property lost: %q", v)
+	if fv, ok := FrontmatterGetValue(yaml, "type"); !ok || fv != "pattern" {
+		t.Errorf("type property lost: %q", fv)
 	}
 }
 
@@ -566,13 +582,13 @@ func TestE2EPatchByLineRange(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 
+	v := &Vault{dir: vaultDir}
+
 	// Patch lines 3-7 with new content
-	patchParams := map[string]string{
-		"file":    "LineTest",
-		"line":    "3-7",
-		"content": "Line 3-7: Replaced with single consolidated line",
-	}
-	if err := cmdPatch(vaultDir, patchParams, false, false); err != nil {
+	if err := v.Patch("LineTest", PatchOptions{
+		LineSpec: "3-7",
+		Content:  "Line 3-7: Replaced with single consolidated line",
+	}); err != nil {
 		t.Fatalf("patch by line range: %v", err)
 	}
 
@@ -632,61 +648,49 @@ func TestE2EContentManipulationDoesNotCorruptVault(t *testing.T) {
 		}
 	}
 
+	v := &Vault{dir: vaultDir}
+
 	// Operation 1: Write to Alpha (replace body)
-	if err := cmdWrite(vaultDir, map[string]string{
-		"file":    "Alpha",
-		"content": "# Alpha Revised\n\n## New Section\n\nCompletely new content.\n",
-	}, false); err != nil {
+	if err := v.Write("Alpha", "# Alpha Revised\n\n## New Section\n\nCompletely new content.\n", false); err != nil {
 		t.Fatalf("write Alpha: %v", err)
 	}
 
 	// Operation 2: Patch Beta by heading
-	if err := cmdPatch(vaultDir, map[string]string{
-		"file":    "Beta",
-		"heading": "## Details",
-		"content": "\nPatched beta details.\n",
-	}, false, false); err != nil {
+	if err := v.Patch("Beta", PatchOptions{
+		Heading: "## Details",
+		Content: "\nPatched beta details.\n",
+	}); err != nil {
 		t.Fatalf("patch Beta: %v", err)
 	}
 
 	// Operation 3: Append to Gamma
-	if err := cmdAppend(vaultDir, map[string]string{
-		"file":    "Gamma",
-		"content": "\nAppended to Gamma.\n",
-	}, false); err != nil {
+	if err := v.Append("Gamma", "\nAppended to Gamma.\n", false); err != nil {
 		t.Fatalf("append Gamma: %v", err)
 	}
 
 	// Operation 4: Prepend to Delta
-	if err := cmdPrepend(vaultDir, map[string]string{
-		"file":    "Delta",
-		"content": "URGENT: Check this bug.\n",
-	}, false); err != nil {
+	if err := v.Prepend("Delta", "URGENT: Check this bug.\n", false); err != nil {
 		t.Fatalf("prepend Delta: %v", err)
 	}
 
 	// Operation 5: Patch Gamma by line range
-	if err := cmdPatch(vaultDir, map[string]string{
-		"file":    "Gamma",
-		"line":    "8-10",
-		"content": "Replaced lines.",
-	}, false, false); err != nil {
+	if err := v.Patch("Gamma", PatchOptions{
+		LineSpec: "8-10",
+		Content:  "Replaced lines.",
+	}); err != nil {
 		t.Fatalf("patch Gamma lines: %v", err)
 	}
 
 	// Operation 6: Delete a section from Delta
-	if err := cmdPatch(vaultDir, map[string]string{
-		"file":    "Delta",
-		"heading": "## Root Cause",
-	}, true, false); err != nil {
+	if err := v.Patch("Delta", PatchOptions{
+		Heading: "## Root Cause",
+		Delete:  true,
+	}); err != nil {
 		t.Fatalf("delete section Delta: %v", err)
 	}
 
 	// Operation 7: Write to Epsilon (no frontmatter)
-	if err := cmdWrite(vaultDir, map[string]string{
-		"file":    "Epsilon",
-		"content": "# Epsilon Rewritten\n\nNew content.\n",
-	}, false); err != nil {
+	if err := v.Write("Epsilon", "# Epsilon Rewritten\n\nNew content.\n", false); err != nil {
 		t.Fatalf("write Epsilon: %v", err)
 	}
 
@@ -715,7 +719,7 @@ func TestE2EContentManipulationDoesNotCorruptVault(t *testing.T) {
 		}
 
 		// Frontmatter, if present, must be parseable
-		yaml, _, hasFM := extractFrontmatter(content)
+		yaml, _, hasFM := ExtractFrontmatter(content)
 		if hasFM {
 			// Verify frontmatter has valid structure
 			if yaml == "" {
@@ -727,36 +731,31 @@ func TestE2EContentManipulationDoesNotCorruptVault(t *testing.T) {
 			}
 		}
 
-		// Must be readable via cmdRead without error
-		readOut := captureStdout(func() {
-			readParams := map[string]string{"file": strings.TrimSuffix(filepath.Base(relPath), ".md")}
-			if err := cmdRead(vaultDir, readParams); err != nil {
-				t.Errorf("%s: cmdRead failed: %v", relPath, err)
-			}
-		})
-		if readOut == "" {
-			t.Errorf("%s: cmdRead returned empty output", relPath)
+		// Must be readable via v.Read without error
+		noteName := strings.TrimSuffix(filepath.Base(relPath), ".md")
+		readContent, err := v.Read(noteName, "")
+		if err != nil {
+			t.Errorf("%s: v.Read failed: %v", relPath, err)
+		}
+		if readContent == "" {
+			t.Errorf("%s: v.Read returned empty output", relPath)
 		}
 
 		// Must be findable via search (all notes have some text content)
-		searchOut := captureStdout(func() {
-			// Search for filename to ensure the note is indexed
-			searchParams := map[string]string{"query": strings.TrimSuffix(filepath.Base(relPath), ".md")}
-			cmdSearch(vaultDir, searchParams, "")
-		})
-		_ = searchOut // Search might not find by title substring; presence check is sufficient
+		// Search for filename to ensure the note is indexed
+		_, _ = v.Search(SearchOptions{Query: noteName})
 	}
 
 	// Verify specific content integrity after all operations
 
 	// Alpha: frontmatter preserved, new body present
 	alphaData, _ := os.ReadFile(filepath.Join(vaultDir, "docs/Alpha.md"))
-	alphaYAML, _, alphaHasFM := extractFrontmatter(string(alphaData))
+	alphaYAML, _, alphaHasFM := ExtractFrontmatter(string(alphaData))
 	if !alphaHasFM {
 		t.Error("Alpha: frontmatter lost")
 	}
-	if v, ok := frontmatterGetValue(alphaYAML, "type"); !ok || v != "concept" {
-		t.Errorf("Alpha: type property lost: %q", v)
+	if fv, ok := FrontmatterGetValue(alphaYAML, "type"); !ok || fv != "concept" {
+		t.Errorf("Alpha: type property lost: %q", fv)
 	}
 	if !strings.Contains(string(alphaData), "Completely new content.") {
 		t.Error("Alpha: new body content missing")
@@ -817,7 +816,7 @@ func TestE2EContentManipulationDoesNotCorruptVault(t *testing.T) {
 func buildVLT(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "vlt-test")
-	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd := exec.Command("go", "build", "-o", bin, "./cmd/vlt")
 	cmd.Dir = "."
 	out, err := cmd.CombinedOutput()
 	if err != nil {

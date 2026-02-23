@@ -1,7 +1,6 @@
-package main
+package vlt
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,29 +8,37 @@ import (
 	"strings"
 )
 
-// task represents a parsed checkbox item from a note.
-type task struct {
+// Task represents a parsed checkbox item from a note.
+type Task struct {
 	Text string `json:"text"` // task text after the checkbox
 	Done bool   `json:"done"` // true if [x] or [X]
 	Line int    `json:"line"` // 1-based line number
 	File string `json:"file"` // relative path (when searching vault-wide)
 }
 
+// TaskOptions parameterises a Tasks call.
+type TaskOptions struct {
+	File    string // single-file mode: resolve by title
+	Path    string // vault-wide mode: limit to subfolder
+	Done    bool   // filter: only completed tasks
+	Pending bool   // filter: only incomplete tasks
+}
+
 // taskPattern matches markdown checkboxes: - [ ] text or - [x] text
 // Allows leading whitespace/tabs for nesting.
 var taskPattern = regexp.MustCompile(`(?m)^[\t ]*- \[([ xX])\] (.+)$`)
 
-// parseTasks extracts all checkbox items from text.
-func parseTasks(text string) []task {
+// ParseTasks extracts all checkbox items from text.
+func ParseTasks(text string) []Task {
 	lines := strings.Split(text, "\n")
-	var tasks []task
+	var tasks []Task
 
 	for i, line := range lines {
 		m := taskPattern.FindStringSubmatch(line)
 		if m == nil {
 			continue
 		}
-		tasks = append(tasks, task{
+		tasks = append(tasks, Task{
 			Text: m[2],
 			Done: m[1] == "x" || m[1] == "X",
 			Line: i + 1,
@@ -40,51 +47,46 @@ func parseTasks(text string) []task {
 	return tasks
 }
 
-// cmdTasks lists tasks (checkboxes) from one note or across the vault.
-// Supports filters: done (only completed), pending (only incomplete).
-// Supports path= to limit search to a subfolder.
-func cmdTasks(vaultDir string, params map[string]string, flags map[string]bool) error {
-	format := outputFormat(flags)
-	filterDone := flags["done"]
-	filterPending := flags["pending"]
-
-	title := params["file"]
-	pathFilter := params["path"]
+// Tasks lists tasks (checkboxes) from one note or across the vault.
+// Supports filters via opts.Done and opts.Pending.
+// Supports opts.Path to limit search to a subfolder.
+func (v *Vault) Tasks(opts TaskOptions) ([]Task, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 
 	// Single file mode
-	if title != "" {
-		path, err := resolveNote(vaultDir, title)
+	if opts.File != "" {
+		path, err := resolveNote(v.dir, opts.File)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		data, err := os.ReadFile(path)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
-		relPath, _ := filepath.Rel(vaultDir, path)
-		tasks := parseTasks(string(data))
-		tasks = filterTasks(tasks, filterDone, filterPending)
+		relPath, _ := filepath.Rel(v.dir, path)
+		tasks := ParseTasks(string(data))
+		tasks = filterTasks(tasks, opts.Done, opts.Pending)
 
 		for i := range tasks {
 			tasks[i].File = relPath
 		}
 
-		outputTasks(tasks, format)
-		return nil
+		return tasks, nil
 	}
 
 	// Vault-wide mode
-	searchRoot := vaultDir
-	if pathFilter != "" {
-		searchRoot = filepath.Join(vaultDir, pathFilter)
+	searchRoot := v.dir
+	if opts.Path != "" {
+		searchRoot = filepath.Join(v.dir, opts.Path)
 		if _, err := os.Stat(searchRoot); os.IsNotExist(err) {
-			return fmt.Errorf("path filter %q not found in vault", pathFilter)
+			return nil, fmt.Errorf("path filter %q not found in vault", opts.Path)
 		}
 	}
 
-	var allTasks []task
+	var allTasks []Task
 
 	err := filepath.WalkDir(searchRoot, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -104,8 +106,8 @@ func cmdTasks(vaultDir string, params map[string]string, flags map[string]bool) 
 			return nil
 		}
 
-		relPath, _ := filepath.Rel(vaultDir, path)
-		tasks := parseTasks(string(data))
+		relPath, _ := filepath.Rel(v.dir, path)
+		tasks := ParseTasks(string(data))
 
 		for i := range tasks {
 			tasks[i].File = relPath
@@ -116,21 +118,20 @@ func cmdTasks(vaultDir string, params map[string]string, flags map[string]bool) 
 	})
 
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	allTasks = filterTasks(allTasks, filterDone, filterPending)
-	outputTasks(allTasks, format)
-	return nil
+	allTasks = filterTasks(allTasks, opts.Done, opts.Pending)
+	return allTasks, nil
 }
 
 // filterTasks applies done/pending filters.
-func filterTasks(tasks []task, done, pending bool) []task {
+func filterTasks(tasks []Task, done, pending bool) []Task {
 	if !done && !pending {
 		return tasks
 	}
 
-	var result []task
+	var result []Task
 	for _, t := range tasks {
 		if done && t.Done {
 			result = append(result, t)
@@ -140,34 +141,4 @@ func filterTasks(tasks []task, done, pending bool) []task {
 		}
 	}
 	return result
-}
-
-// outputTasks prints tasks in the requested format.
-func outputTasks(tasks []task, format string) {
-	switch format {
-	case "json":
-		data, _ := json.Marshal(tasks)
-		fmt.Println(string(data))
-	case "csv":
-		fmt.Println("done,text,line,file")
-		for _, t := range tasks {
-			done := "false"
-			if t.Done {
-				done = "true"
-			}
-			fmt.Printf("%s,%q,%d,%s\n", done, t.Text, t.Line, t.File)
-		}
-	case "yaml":
-		for _, t := range tasks {
-			fmt.Printf("- text: %s\n  done: %v\n  line: %d\n  file: %s\n", yamlEscapeValue(t.Text), t.Done, t.Line, t.File)
-		}
-	default:
-		for _, t := range tasks {
-			check := " "
-			if t.Done {
-				check = "x"
-			}
-			fmt.Printf("- [%s] %s (%s:%d)\n", check, t.Text, t.File, t.Line)
-		}
-	}
 }

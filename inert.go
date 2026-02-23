@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import "regexp"
 
@@ -18,10 +18,10 @@ func registerMaskPass(p maskPass) {
 	inertPasses = append(inertPasses, p)
 }
 
-// maskInertContent applies all registered masking passes in order.
+// MaskInertContent applies all registered masking passes in order.
 // The result has the same byte length and line count as the input,
 // but content inside inert zones is replaced with spaces (preserving newlines).
-func maskInertContent(text string) string {
+func MaskInertContent(text string) string {
 	for _, pass := range inertPasses {
 		text = pass(text)
 	}
@@ -84,7 +84,7 @@ func maskFencedCodeBlocks(text string) string {
 	return string(buf)
 }
 
-// doubleBacktickPattern matches inline code spans delimited by “.
+// doubleBacktickPattern matches inline code spans delimited by ".
 // Group 1 captures the content between the double-backtick delimiters.
 // Must be applied before singleBacktickPattern to avoid partial matches.
 var doubleBacktickPattern = regexp.MustCompile("``([^`\\n]+)``")
@@ -93,11 +93,11 @@ var doubleBacktickPattern = regexp.MustCompile("``([^`\\n]+)``")
 // Group 1 captures the content between the single-backtick delimiters.
 var singleBacktickPattern = regexp.MustCompile("`([^`\\n]+)`")
 
-// maskInlineCode masks the content inside inline code spans (` ... ` and “ ... “).
+// maskInlineCode masks the content inside inline code spans (` ... ` and " ... ").
 // The backtick delimiters themselves are NOT masked, only the content between them.
 // This pass runs AFTER fenced code blocks so that backticks already masked
 // inside fenced blocks (replaced with spaces) do not trigger false matches.
-// Double-backtick spans are processed first so that “ ` “ is handled correctly.
+// Double-backtick spans are processed first so that " ` " is handled correctly.
 func maskInlineCode(text string) string {
 	buf := []byte(text)
 

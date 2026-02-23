@@ -60,6 +60,12 @@ For straightforward vaults -- plain notes, frontmatter, wikilinks, tags -- this 
 ### From source (requires Go 1.24+)
 
 ```bash
+go install github.com/RamXX/vlt/cmd/vlt@latest
+```
+
+Or build from a local clone:
+
+```bash
 git clone https://github.com/RamXX/vlt.git
 cd vlt
 make build     # produces ./vlt binary
@@ -554,24 +560,41 @@ vlt was built independently for agentic memory use cases, not as a replacement f
 
 ## Architecture
 
-vlt is a single-package Go binary with zero external dependencies. The entire tool runs on Go's standard library.
+vlt is structured as an importable Go library (`package vlt`) with a thin CLI wrapper. Zero external dependencies -- the entire tool runs on Go's standard library.
 
 ```
-main.go          CLI entry point, argument parsing, command dispatch
-vault.go         Vault discovery from Obsidian config, note resolution
-commands.go      Command implementations (read, search, create, write, patch, move, etc.)
-wikilinks.go     Wikilink/embed parsing, replacement, markdown link repair
-frontmatter.go   YAML frontmatter extraction and manipulation
-tags.go          Inline tag parsing and tag-based queries
-format.go        Output formatting (JSON, CSV, YAML, TSV, tree, plain text)
-inert.go         6-pass inert zone masking (code blocks, comments, math)
-tasks.go         Task/checkbox parsing and queries
-daily.go         Daily note creation and config loading
-templates.go     Template discovery, variable substitution, note creation
-bookmarks.go     Bookmark management via .obsidian/bookmarks.json
-lock.go          Write-command classification and lock file constants
-lock_unix.go     Advisory file locking via flock(2)
-lock_windows.go  Advisory file locking via kernel32 LockFileEx/UnlockFileEx
+package vlt (root)           Importable library
+  vault.go                   Vault type, discovery, note resolution
+  commands.go                Vault methods (Read, Search, Create, Write, Patch, Move, etc.)
+  wikilinks.go               Wikilink/embed parsing, replacement, markdown link repair
+  frontmatter.go             YAML frontmatter extraction and manipulation
+  tags.go                    Inline tag parsing and tag-based queries
+  inert.go                   6-pass inert zone masking (code blocks, comments, math)
+  tasks.go                   Task/checkbox parsing and queries
+  daily.go                   Daily note creation and config loading
+  templates.go               Template discovery, variable substitution, note creation
+  bookmarks.go               Bookmark management via .obsidian/bookmarks.json
+  lock.go                    Write-command classification and lock file constants
+  lock_unix.go               Advisory file locking via flock(2)
+  lock_windows.go            Advisory file locking via kernel32 LockFileEx/UnlockFileEx
+
+cmd/vlt/ (CLI)               Thin CLI wrapper
+  main.go                    CLI entry point, argument parsing, command dispatch
+  dispatch.go                CLI-to-library bridge functions
+  format.go                  Output formatting (JSON, CSV, YAML, TSV, tree, plain text)
+```
+
+### Library usage
+
+Other Go programs can import vlt directly:
+
+```go
+import "github.com/RamXX/vlt"
+
+vault, _ := vlt.OpenByName("MyVault")
+content, _ := vault.Read("Session Operating Mode", "")
+results, _ := vault.Search(vlt.SearchOptions{Query: "architecture"})
+_ = vault.Append("Daily Log", "New entry", false)
 ```
 
 **Design choices:**
@@ -616,11 +639,13 @@ All tests use `t.TempDir()` for isolated vault environments. No mocks -- every t
 
 ### Adding a new command
 
-1. Add the command name to `knownCommands` in `main.go`
-2. Implement `cmdYourCommand(vaultDir string, params map[string]string) error` in `commands.go` (or a dedicated file for larger features)
-3. Add the dispatch case in `main()` switch
-4. Add usage line and examples in `usage()`
-5. Write tests in `main_test.go` (or a dedicated `*_test.go` file)
+1. Add the library method `func (v *Vault) YourCommand(...) (ResultType, error)` in `commands.go` (or a dedicated file)
+2. Add the command name to `knownCommands` in `cmd/vlt/main.go`
+3. Add a `dispatchYourCommand` function in `cmd/vlt/dispatch.go` to bridge CLI params to the library method
+4. Add the dispatch case in the `main()` switch in `cmd/vlt/main.go`
+5. Add usage line and examples in `usage()` in `cmd/vlt/main.go`
+6. Write library tests in a `*_test.go` file at the root (test return values, not stdout)
+7. Write format tests in `cmd/vlt/format_test.go` if adding new output formatting
 
 ## Contributing
 

@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"testing"
@@ -44,7 +44,7 @@ func TestExtractFrontmatter(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			yaml, start, found := extractFrontmatter(tt.text)
+			yaml, start, found := ExtractFrontmatter(tt.text)
 			if found != tt.wantFound {
 				t.Errorf("found = %v, want %v", found, tt.wantFound)
 			}
@@ -105,7 +105,7 @@ func TestFrontmatterGetList(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := frontmatterGetList(tt.yaml, tt.key)
+			got := FrontmatterGetList(tt.yaml, tt.key)
 
 			if tt.want == nil {
 				if got != nil {
@@ -141,7 +141,7 @@ func TestFrontmatterGetValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
-			val, found := frontmatterGetValue(yaml, tt.key)
+			val, found := FrontmatterGetValue(yaml, tt.key)
 			if found != tt.wantFound {
 				t.Errorf("found = %v, want %v", found, tt.wantFound)
 			}

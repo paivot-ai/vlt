@@ -1,4 +1,4 @@
-package main
+package vlt
 
 import (
 	"os"
@@ -23,9 +23,9 @@ func TestMomentToGoFormat(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.moment, func(t *testing.T) {
-			got := momentToGoFormat(tt.moment)
+			got := MomentToGoFormat(tt.moment)
 			if got != tt.want {
-				t.Errorf("momentToGoFormat(%q) = %q, want %q", tt.moment, got, tt.want)
+				t.Errorf("MomentToGoFormat(%q) = %q, want %q", tt.moment, got, tt.want)
 			}
 		})
 	}
@@ -90,12 +90,17 @@ func TestLoadDailyConfig_PeriodicNotes(t *testing.T) {
 	}
 }
 
-func TestCmdDaily_CreateNew(t *testing.T) {
+func TestDaily_CreateNew(t *testing.T) {
 	vaultDir := t.TempDir()
 
-	params := map[string]string{}
-	if err := cmdDaily(vaultDir, params); err != nil {
-		t.Fatalf("daily create: %v", err)
+	v := &Vault{dir: vaultDir}
+	result, err := v.Daily("")
+	if err != nil {
+		t.Fatalf("Daily create: %v", err)
+	}
+
+	if !result.Created {
+		t.Error("expected Created=true for new note")
 	}
 
 	// Should create today's note
@@ -112,7 +117,7 @@ func TestCmdDaily_CreateNew(t *testing.T) {
 	}
 }
 
-func TestCmdDaily_ReadExisting(t *testing.T) {
+func TestDaily_ReadExisting(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	today := time.Now().Format("2006-01-02")
@@ -123,23 +128,31 @@ func TestCmdDaily_ReadExisting(t *testing.T) {
 		0644,
 	)
 
-	got := captureStdout(func() {
-		if err := cmdDaily(vaultDir, map[string]string{}); err != nil {
-			t.Fatalf("daily read: %v", err)
-		}
-	})
+	v := &Vault{dir: vaultDir}
+	result, err := v.Daily("")
+	if err != nil {
+		t.Fatalf("Daily read: %v", err)
+	}
 
-	if got != content {
-		t.Errorf("got %q, want %q", got, content)
+	if result.Created {
+		t.Error("expected Created=false for existing note")
+	}
+	if result.Content != content {
+		t.Errorf("got Content %q, want %q", result.Content, content)
 	}
 }
 
-func TestCmdDaily_SpecificDate(t *testing.T) {
+func TestDaily_SpecificDate(t *testing.T) {
 	vaultDir := t.TempDir()
 
-	params := map[string]string{"date": "2025-06-15"}
-	if err := cmdDaily(vaultDir, params); err != nil {
-		t.Fatalf("daily specific date: %v", err)
+	v := &Vault{dir: vaultDir}
+	result, err := v.Daily("2025-06-15")
+	if err != nil {
+		t.Fatalf("Daily specific date: %v", err)
+	}
+
+	if !result.Created {
+		t.Error("expected Created=true for new note")
 	}
 
 	notePath := filepath.Join(vaultDir, "2025-06-15.md")
@@ -153,7 +166,7 @@ func TestCmdDaily_SpecificDate(t *testing.T) {
 	}
 }
 
-func TestCmdDaily_WithTemplate(t *testing.T) {
+func TestDaily_WithTemplate(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	os.MkdirAll(filepath.Join(vaultDir, ".obsidian"), 0755)
@@ -171,9 +184,14 @@ func TestCmdDaily_WithTemplate(t *testing.T) {
 		0644,
 	)
 
-	params := map[string]string{"date": "2025-03-20"}
-	if err := cmdDaily(vaultDir, params); err != nil {
-		t.Fatalf("daily with template: %v", err)
+	v := &Vault{dir: vaultDir}
+	result, err := v.Daily("2025-03-20")
+	if err != nil {
+		t.Fatalf("Daily with template: %v", err)
+	}
+
+	if !result.Created {
+		t.Error("expected Created=true")
 	}
 
 	notePath := filepath.Join(vaultDir, "2025-03-20.md")
@@ -194,7 +212,7 @@ func TestCmdDaily_WithTemplate(t *testing.T) {
 	}
 }
 
-func TestCmdDaily_WithFolder(t *testing.T) {
+func TestDaily_WithFolder(t *testing.T) {
 	vaultDir := t.TempDir()
 
 	os.MkdirAll(filepath.Join(vaultDir, ".obsidian"), 0755)
@@ -204,9 +222,10 @@ func TestCmdDaily_WithFolder(t *testing.T) {
 		0644,
 	)
 
-	params := map[string]string{"date": "2025-06-15"}
-	if err := cmdDaily(vaultDir, params); err != nil {
-		t.Fatalf("daily with folder: %v", err)
+	v := &Vault{dir: vaultDir}
+	_, err := v.Daily("2025-06-15")
+	if err != nil {
+		t.Fatalf("Daily with folder: %v", err)
 	}
 
 	notePath := filepath.Join(vaultDir, "journal", "2025-06-15.md")
@@ -215,11 +234,12 @@ func TestCmdDaily_WithFolder(t *testing.T) {
 	}
 }
 
-func TestCmdDaily_InvalidDate(t *testing.T) {
+func TestDaily_InvalidDate(t *testing.T) {
 	vaultDir := t.TempDir()
 
-	params := map[string]string{"date": "not-a-date"}
-	if err := cmdDaily(vaultDir, params); err == nil {
+	v := &Vault{dir: vaultDir}
+	_, err := v.Daily("not-a-date")
+	if err == nil {
 		t.Fatal("expected error for invalid date")
 	}
 }

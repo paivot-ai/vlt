@@ -7,6 +7,8 @@ import (
 	"os"
 	"sort"
 	"strings"
+
+	vlt "github.com/RamXX/vlt"
 )
 
 // outputFormat extracts the output format from flags.
@@ -188,7 +190,7 @@ func formatVaults(names []string, vaults map[string]string, format string) {
 }
 
 // formatSearchResults outputs search results in the requested format.
-func formatSearchResults(results []searchResult, format string) {
+func formatSearchResults(results []vlt.SearchResult, format string) {
 	switch format {
 	case "json":
 		type jsonResult struct {
@@ -197,7 +199,7 @@ func formatSearchResults(results []searchResult, format string) {
 		}
 		entries := make([]jsonResult, len(results))
 		for i, r := range results {
-			entries[i] = jsonResult{Title: r.title, Path: r.relPath}
+			entries[i] = jsonResult{Title: r.Title, Path: r.RelPath}
 		}
 		data, _ := json.Marshal(entries)
 		fmt.Println(string(data))
@@ -205,31 +207,27 @@ func formatSearchResults(results []searchResult, format string) {
 		w := csv.NewWriter(os.Stdout)
 		w.Write([]string{"title", "path"})
 		for _, r := range results {
-			w.Write([]string{r.title, r.relPath})
+			w.Write([]string{r.Title, r.RelPath})
 		}
 		w.Flush()
 	case "tsv":
 		fmt.Println("title\tpath")
 		for _, r := range results {
-			fmt.Printf("%s\t%s\n", r.title, r.relPath)
+			fmt.Printf("%s\t%s\n", r.Title, r.RelPath)
 		}
 	case "yaml":
 		for _, r := range results {
-			fmt.Printf("- title: %s\n  path: %s\n", yamlEscapeValue(r.title), r.relPath)
+			fmt.Printf("- title: %s\n  path: %s\n", yamlEscapeValue(r.Title), r.RelPath)
 		}
 	default:
 		for _, r := range results {
-			fmt.Printf("%s (%s)\n", r.title, r.relPath)
+			fmt.Printf("%s (%s)\n", r.Title, r.RelPath)
 		}
 	}
 }
 
 // formatSearchWithContext outputs context-aware search results in the requested format.
-// For plain text: file:line:content (one line per context line in each range).
-// For JSON: array of {file, line, match, context} objects.
-// For CSV: file,line,content columns (one row per context line).
-// For YAML: structured entries with file, line, match, context fields.
-func formatSearchWithContext(matches []contextMatch, format string) {
+func formatSearchWithContext(matches []vlt.ContextMatch, format string) {
 	switch format {
 	case "json":
 		type jsonContextMatch struct {
@@ -258,12 +256,10 @@ func formatSearchWithContext(matches []contextMatch, format string) {
 		w.Write([]string{"file", "line", "content"})
 		for _, m := range matches {
 			if m.Context == nil {
-				// Title-only match
 				w.Write([]string{m.File, fmt.Sprintf("%d", m.Line), m.Match})
 				continue
 			}
-			// Output each context line with the correct line number
-			startLine := m.Line - 1 // 0-based index of match
+			startLine := m.Line - 1
 			ctxBefore := 0
 			for j, c := range m.Context {
 				if c == m.Match && j <= startLine {
@@ -312,9 +308,6 @@ func formatSearchWithContext(matches []contextMatch, format string) {
 			}
 		}
 	default:
-		// Plain text: file:line:content format
-		// To avoid duplicate lines from overlapping match contexts,
-		// we deduplicate by tracking file+line combinations we have already emitted.
 		type fileLineKey struct {
 			file string
 			line int
@@ -324,18 +317,15 @@ func formatSearchWithContext(matches []contextMatch, format string) {
 
 		for _, m := range matches {
 			if m.Context == nil {
-				// Title-only match
 				fmt.Printf("%s (title match)\n", m.File)
 				continue
 			}
 
-			// Separate blocks from different files with a blank line
 			if prevFile != "" && m.File != prevFile {
 				fmt.Println("--")
 			}
 			prevFile = m.File
 
-			// Calculate the starting line number for the context window
 			ctxBefore := 0
 			for j, c := range m.Context {
 				if c == m.Match {
@@ -359,7 +349,7 @@ func formatSearchWithContext(matches []contextMatch, format string) {
 }
 
 // formatLinks outputs link information in the requested format.
-func formatLinks(links []linkInfo, format string) {
+func formatLinks(links []vlt.LinkInfo, format string) {
 	switch format {
 	case "json":
 		data, _ := json.Marshal(links)
@@ -400,7 +390,7 @@ func formatLinks(links []linkInfo, format string) {
 }
 
 // formatUnresolved outputs unresolved link information.
-func formatUnresolved(results []unresolvedResult, format string) {
+func formatUnresolved(results []vlt.UnresolvedLink, format string) {
 	switch format {
 	case "json":
 		data, _ := json.Marshal(results)
@@ -435,7 +425,6 @@ func formatProperties(text string, format string) {
 		return
 	}
 
-	// Parse the frontmatter into key-value pairs
 	lines := strings.Split(text, "\n")
 	props := make(map[string]string)
 	var keys []string
@@ -477,6 +466,36 @@ func formatProperties(text string, format string) {
 	}
 }
 
+// outputTasks prints tasks in the requested format.
+func outputTasks(tasks []vlt.Task, format string) {
+	switch format {
+	case "json":
+		data, _ := json.Marshal(tasks)
+		fmt.Println(string(data))
+	case "csv":
+		fmt.Println("done,text,line,file")
+		for _, t := range tasks {
+			done := "false"
+			if t.Done {
+				done = "true"
+			}
+			fmt.Printf("%s,%q,%d,%s\n", done, t.Text, t.Line, t.File)
+		}
+	case "yaml":
+		for _, t := range tasks {
+			fmt.Printf("- text: %s\n  done: %v\n  line: %d\n  file: %s\n", yamlEscapeValue(t.Text), t.Done, t.Line, t.File)
+		}
+	default:
+		for _, t := range tasks {
+			check := " "
+			if t.Done {
+				check = "x"
+			}
+			fmt.Printf("- [%s] %s (%s:%d)\n", check, t.Text, t.File, t.Line)
+		}
+	}
+}
+
 // treeNode represents a node in a directory tree for tree-format rendering.
 type treeNode struct {
 	name     string
@@ -491,7 +510,6 @@ func renderTree(items []string) {
 		return
 	}
 
-	// Build tree structure
 	root := &treeNode{name: ".", isDir: true}
 
 	for _, item := range items {
@@ -499,7 +517,6 @@ func renderTree(items []string) {
 		current := root
 		for i, part := range parts {
 			isDir := i < len(parts)-1
-			// Find existing child
 			var child *treeNode
 			for _, c := range current.children {
 				if c.name == part && c.isDir == isDir {
@@ -515,23 +532,19 @@ func renderTree(items []string) {
 		}
 	}
 
-	// Sort children at each level: directories first, then files, both alphabetically
 	sortTree(root)
 
-	// Render tree from root's children (skip the root "." node)
 	for i, child := range root.children {
 		isLast := i == len(root.children)-1
 		printTreeNode(child, "", isLast)
 	}
 }
 
-// sortTree recursively sorts children at each level: directories first, then
-// files, both groups sorted alphabetically.
 func sortTree(node *treeNode) {
 	sort.Slice(node.children, func(i, j int) bool {
 		a, b := node.children[i], node.children[j]
 		if a.isDir != b.isDir {
-			return a.isDir // directories first
+			return a.isDir
 		}
 		return a.name < b.name
 	})
@@ -540,12 +553,10 @@ func sortTree(node *treeNode) {
 	}
 }
 
-// printTreeNode recursively renders a tree node with proper indentation and
-// Unicode box-drawing connectors.
 func printTreeNode(node *treeNode, prefix string, isLast bool) {
-	connector := "\u251c\u2500\u2500 " // "--- "
+	connector := "\u251c\u2500\u2500 "
 	if isLast {
-		connector = "\u2514\u2500\u2500 " // "--- "
+		connector = "\u2514\u2500\u2500 "
 	}
 
 	displayName := node.name
@@ -555,8 +566,7 @@ func printTreeNode(node *treeNode, prefix string, isLast bool) {
 
 	fmt.Printf("%s%s%s\n", prefix, connector, displayName)
 
-	// Determine the prefix for children
-	childPrefix := prefix + "\u2502   " // "    "
+	childPrefix := prefix + "\u2502   "
 	if isLast {
 		childPrefix = prefix + "    "
 	}

@@ -1,7 +1,6 @@
-package main
+package vlt
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,12 +14,12 @@ import (
 // slashes (for hierarchical tags like #project/backend).
 var tagPattern = regexp.MustCompile(`(?:^|[\s(])#([\p{L}\p{N}_/-]+)`)
 
-// parseInlineTags extracts inline #tags from text.
+// ParseInlineTags extracts inline #tags from text.
 // Skips pure-numeric tags (Obsidian requires at least one letter).
 // Content inside inert zones (fenced code blocks, etc.) is masked
 // before extraction so those tags are ignored.
-func parseInlineTags(text string) []string {
-	text = maskInertContent(text)
+func ParseInlineTags(text string) []string {
+	text = MaskInertContent(text)
 	matches := tagPattern.FindAllStringSubmatch(text, -1)
 	var tags []string
 	for _, m := range matches {
@@ -41,15 +40,15 @@ func hasLetter(s string) bool {
 	return false
 }
 
-// allNoteTags returns all tags from a note (inline body + frontmatter),
+// AllNoteTags returns all tags from a note (inline body + frontmatter),
 // lowercased and deduplicated.
-func allNoteTags(text string) []string {
+func AllNoteTags(text string) []string {
 	seen := make(map[string]bool)
 	var result []string
 
-	yaml, bodyStart, hasFM := extractFrontmatter(text)
+	yaml, bodyStart, hasFM := ExtractFrontmatter(text)
 	if hasFM {
-		for _, t := range frontmatterGetList(yaml, "tags") {
+		for _, t := range FrontmatterGetList(yaml, "tags") {
 			lower := strings.ToLower(t)
 			if !seen[lower] {
 				seen[lower] = true
@@ -67,7 +66,7 @@ func allNoteTags(text string) []string {
 		}
 	}
 
-	for _, t := range parseInlineTags(body) {
+	for _, t := range ParseInlineTags(body) {
 		lower := strings.ToLower(t)
 		if !seen[lower] {
 			seen[lower] = true
@@ -78,13 +77,16 @@ func allNoteTags(text string) []string {
 	return result
 }
 
-// cmdTags lists all tags in the vault. With showCounts, includes note counts.
-// Supports sort="count" to sort by frequency (default: alphabetical).
-func cmdTags(vaultDir string, params map[string]string, showCounts bool, format string) error {
-	tagCounts := make(map[string]int)
-	sortBy := params["sort"]
+// Tags lists all tags in the vault with their note counts.
+// Returns a sorted tag list and a counts map.
+// Supports sortBy="count" to sort by frequency (default: alphabetical).
+func (v *Vault) Tags(sortBy string) ([]string, map[string]int, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 
-	err := filepath.WalkDir(vaultDir, func(path string, d os.DirEntry, err error) error {
+	tagCounts := make(map[string]int)
+
+	err := filepath.WalkDir(v.dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -101,17 +103,17 @@ func cmdTags(vaultDir string, params map[string]string, showCounts bool, format 
 			return nil
 		}
 
-		for _, tag := range allNoteTags(string(data)) {
+		for _, tag := range AllNoteTags(string(data)) {
 			tagCounts[tag]++
 		}
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 
 	if len(tagCounts) == 0 {
-		return nil
+		return nil, tagCounts, nil
 	}
 
 	tags := make([]string, 0, len(tagCounts))
@@ -130,32 +132,21 @@ func cmdTags(vaultDir string, params map[string]string, showCounts bool, format 
 		sort.Strings(tags)
 	}
 
-	if showCounts || format != "" {
-		formatTagCounts(tags, tagCounts, format)
-	} else {
-		tagNames := make([]string, len(tags))
-		for i, t := range tags {
-			tagNames[i] = "#" + t
-		}
-		formatList(tagNames, format)
-	}
-	return nil
+	return tags, tagCounts, nil
 }
 
-// cmdTag finds notes that have a specific tag or any subtag of it.
+// Tag finds notes that have a specific tag or any subtag of it.
 // Matches case-insensitively, consistent with Obsidian.
-func cmdTag(vaultDir string, params map[string]string, format string) error {
-	tag := params["tag"]
-	if tag == "" {
-		return fmt.Errorf("tag requires tag=\"<tagname>\"")
-	}
+func (v *Vault) Tag(tagName string) ([]string, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 
-	tag = strings.TrimPrefix(tag, "#")
-	tagLower := strings.ToLower(tag)
+	tagName = strings.TrimPrefix(tagName, "#")
+	tagLower := strings.ToLower(tagName)
 
 	var results []string
 
-	err := filepath.WalkDir(vaultDir, func(path string, d os.DirEntry, err error) error {
+	err := filepath.WalkDir(v.dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -172,9 +163,9 @@ func cmdTag(vaultDir string, params map[string]string, format string) error {
 			return nil
 		}
 
-		for _, t := range allNoteTags(string(data)) {
+		for _, t := range AllNoteTags(string(data)) {
 			if t == tagLower || strings.HasPrefix(t, tagLower+"/") {
-				relPath, _ := filepath.Rel(vaultDir, path)
+				relPath, _ := filepath.Rel(v.dir, path)
 				results = append(results, relPath)
 				break
 			}
@@ -182,10 +173,9 @@ func cmdTag(vaultDir string, params map[string]string, format string) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	sort.Strings(results)
-	formatList(results, format)
-	return nil
+	return results, nil
 }
