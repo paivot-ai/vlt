@@ -569,6 +569,9 @@ tasks.go         Task/checkbox parsing and queries
 daily.go         Daily note creation and config loading
 templates.go     Template discovery, variable substitution, note creation
 bookmarks.go     Bookmark management via .obsidian/bookmarks.json
+lock.go          Write-command classification and lock file constants
+lock_unix.go     Advisory file locking via flock(2)
+lock_windows.go  Advisory file locking via kernel32 LockFileEx/UnlockFileEx
 ```
 
 **Design choices:**
@@ -579,6 +582,7 @@ bookmarks.go     Bookmark management via .obsidian/bookmarks.json
 - **Case-insensitive link matching** -- Mirrors Obsidian's behavior. `[[my note]]` resolves to `My Note.md`.
 - **Simple frontmatter parsing** -- String-based YAML parsing handles Obsidian's common patterns (key-value, inline lists, block lists) without pulling in a full YAML library.
 - **Inert zone masking** -- Before scanning for links, tags, or references, content inside code blocks, comments, and math expressions is masked out to prevent false positives. Each pass preserves byte offsets and line numbers so that all downstream operations remain position-accurate.
+- **Vault-level advisory locking** -- Multiple vlt processes can safely operate on the same vault concurrently. Write commands (`create`, `append`, `move`, etc.) acquire an exclusive `flock(2)` lock; read commands acquire a shared lock. The lock is kernel-managed via `.vlt.lock` in the vault root, so it auto-releases on process crash or kill -- no stale lock cleanup needed.
 
 ### Stats
 

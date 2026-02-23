@@ -1,9 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -800,5 +803,332 @@ func TestE2EContentManipulationDoesNotCorruptVault(t *testing.T) {
 	}
 	if !strings.Contains(string(epsilonData), "Epsilon Rewritten") {
 		t.Error("Epsilon: new content missing")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Integration tests for vault-level file locking.
+//
+// These spawn real OS processes (the compiled vlt binary) that contend on the
+// same vault directory. No mocks. Real flock, real filesystem, real I/O.
+// ---------------------------------------------------------------------------
+
+// buildVLT compiles the vlt binary into t.TempDir and returns its path.
+func buildVLT(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "vlt-test")
+	cmd := exec.Command("go", "build", "-o", bin, ".")
+	cmd.Dir = "."
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("build vlt: %v\n%s", err, out)
+	}
+	return bin
+}
+
+// TestE2EConcurrentAppendNoCorruption spawns N concurrent vlt append processes
+// against the same note and verifies every line appears exactly once.
+func TestE2EConcurrentAppendNoCorruption(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrent integration test in short mode")
+	}
+	bin := buildVLT(t)
+	vaultDir := t.TempDir()
+
+	// Create the target note.
+	notePath := filepath.Join(vaultDir, "Concurrent.md")
+	if err := os.WriteFile(notePath, []byte("# Concurrent\n"), 0644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	const N = 10
+	var wg sync.WaitGroup
+	errs := make(chan error, N)
+
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			line := fmt.Sprintf("Line from process %d", i)
+			cmd := exec.Command(bin,
+				fmt.Sprintf("vault=%s", vaultDir),
+				"append",
+				"file=Concurrent",
+				fmt.Sprintf("content=%s", line),
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				errs <- fmt.Errorf("process %d: %v\n%s", i, err, out)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Error(err)
+	}
+
+	data, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	content := string(data)
+
+	// Every process's line must appear exactly once.
+	for i := 0; i < N; i++ {
+		line := fmt.Sprintf("Line from process %d", i)
+		count := strings.Count(content, line)
+		if count != 1 {
+			t.Errorf("line %d: appeared %d times (want 1)", i, count)
+		}
+	}
+}
+
+// TestE2EConcurrentReadDuringWrite verifies that a reader does not see a
+// partial write. A writer replaces the note body while readers read it;
+// each reader must see either the old or the new body, never a mix.
+func TestE2EConcurrentReadDuringWrite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrent integration test in short mode")
+	}
+	bin := buildVLT(t)
+	vaultDir := t.TempDir()
+
+	oldBody := "OLD CONTENT INTACT"
+	newBody := "NEW CONTENT INTACT"
+
+	notePath := filepath.Join(vaultDir, "ReadWrite.md")
+	if err := os.WriteFile(notePath, []byte("---\nstatus: active\n---\n\n"+oldBody+"\n"), 0644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	readResults := make(chan string, 20)
+
+	// Launch the writer (exclusive lock).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command(bin,
+			fmt.Sprintf("vault=%s", vaultDir),
+			"write",
+			"file=ReadWrite",
+			fmt.Sprintf("content=%s", newBody),
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Errorf("writer: %v\n%s", err, out)
+		}
+	}()
+
+	// Launch several readers (shared locks) concurrently.
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cmd := exec.Command(bin,
+				fmt.Sprintf("vault=%s", vaultDir),
+				"read",
+				"file=ReadWrite",
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Errorf("reader: %v\n%s", err, out)
+				return
+			}
+			readResults <- string(out)
+		}()
+	}
+
+	wg.Wait()
+	close(readResults)
+
+	for result := range readResults {
+		hasOld := strings.Contains(result, oldBody)
+		hasNew := strings.Contains(result, newBody)
+		if !hasOld && !hasNew {
+			t.Errorf("reader got neither old nor new content:\n%s", result)
+		}
+		if hasOld && hasNew {
+			t.Errorf("reader got BOTH old and new content (torn read):\n%s", result)
+		}
+	}
+}
+
+// TestE2ELockBlocksWriterUntilRelease verifies that an exclusive lock held
+// by one process makes a second writer wait (not fail).
+func TestE2ELockBlocksWriterUntilRelease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrent integration test in short mode")
+	}
+	bin := buildVLT(t)
+	vaultDir := t.TempDir()
+
+	notePath := filepath.Join(vaultDir, "Blocking.md")
+	if err := os.WriteFile(notePath, []byte("# Blocking\n"), 0644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	// Two sequential appends via concurrent processes -- both must succeed.
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+
+	for _, label := range []string{"FIRST", "SECOND"} {
+		wg.Add(1)
+		go func(label string) {
+			defer wg.Done()
+			cmd := exec.Command(bin,
+				fmt.Sprintf("vault=%s", vaultDir),
+				"append",
+				"file=Blocking",
+				fmt.Sprintf("content=Appended by %s", label),
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				errs <- fmt.Errorf("%s: %v\n%s", label, err, out)
+			}
+		}(label)
+	}
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Error(err)
+	}
+
+	data, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("read result: %v", err)
+	}
+	content := string(data)
+
+	if !strings.Contains(content, "Appended by FIRST") {
+		t.Error("FIRST append missing from result")
+	}
+	if !strings.Contains(content, "Appended by SECOND") {
+		t.Error("SECOND append missing from result")
+	}
+}
+
+// TestE2EConcurrentMoveAndRead exercises the most dangerous command (move)
+// concurrently with reads to verify locking prevents corruption.
+func TestE2EConcurrentMoveAndRead(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping concurrent integration test in short mode")
+	}
+	bin := buildVLT(t)
+	vaultDir := t.TempDir()
+
+	// Create two notes that link to each other.
+	noteA := filepath.Join(vaultDir, "SourceNote.md")
+	noteB := filepath.Join(vaultDir, "LinkHolder.md")
+	if err := os.WriteFile(noteA, []byte("# Source\n\nContent of source.\n"), 0644); err != nil {
+		t.Fatalf("setup A: %v", err)
+	}
+	if err := os.WriteFile(noteB, []byte("# Links\n\nSee [[SourceNote]] for details.\n"), 0644); err != nil {
+		t.Fatalf("setup B: %v", err)
+	}
+
+	var wg sync.WaitGroup
+	moveErr := make(chan error, 1)
+	readResults := make(chan string, 5)
+
+	// Move SourceNote -> RenamedNote (exclusive lock, updates wikilinks).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		cmd := exec.Command(bin,
+			fmt.Sprintf("vault=%s", vaultDir),
+			"move",
+			"path=SourceNote.md",
+			"to=RenamedNote.md",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			moveErr <- fmt.Errorf("move: %v\n%s", err, out)
+		}
+	}()
+
+	// Concurrent readers on LinkHolder.
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cmd := exec.Command(bin,
+				fmt.Sprintf("vault=%s", vaultDir),
+				"read",
+				"file=LinkHolder",
+			)
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				// LinkHolder should always be readable.
+				t.Errorf("reader: %v\n%s", err, out)
+				return
+			}
+			readResults <- string(out)
+		}()
+	}
+
+	wg.Wait()
+	close(moveErr)
+	close(readResults)
+
+	for err := range moveErr {
+		t.Error(err)
+	}
+
+	// After move: RenamedNote.md must exist, SourceNote.md must not.
+	if _, err := os.Stat(filepath.Join(vaultDir, "RenamedNote.md")); err != nil {
+		t.Error("RenamedNote.md should exist after move")
+	}
+	if _, err := os.Stat(filepath.Join(vaultDir, "SourceNote.md")); err == nil {
+		t.Error("SourceNote.md should not exist after move")
+	}
+
+	// LinkHolder's wikilinks must have been updated.
+	data, err := os.ReadFile(noteB)
+	if err != nil {
+		t.Fatalf("read LinkHolder: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "[[RenamedNote]]") {
+		t.Errorf("wikilink not updated in LinkHolder:\n%s", content)
+	}
+
+	// Every read must have returned coherent content (heading present).
+	for result := range readResults {
+		if !strings.Contains(result, "# Links") {
+			t.Errorf("reader got incoherent content:\n%s", result)
+		}
+	}
+}
+
+// TestE2ELockFileCreatedByBinary verifies the real binary creates .vlt.lock.
+func TestE2ELockFileCreatedByBinary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+	bin := buildVLT(t)
+	vaultDir := t.TempDir()
+
+	notePath := filepath.Join(vaultDir, "LockCheck.md")
+	if err := os.WriteFile(notePath, []byte("# Lock Check\n"), 0644); err != nil {
+		t.Fatalf("setup: %v", err)
+	}
+
+	cmd := exec.Command(bin,
+		fmt.Sprintf("vault=%s", vaultDir),
+		"read",
+		"file=LockCheck",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("vlt read: %v\n%s", err, out)
+	}
+
+	lockPath := filepath.Join(vaultDir, ".vlt.lock")
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Fatalf(".vlt.lock was not created by the binary: %v", err)
 	}
 }

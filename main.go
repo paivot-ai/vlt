@@ -13,7 +13,7 @@ import (
 	"strings"
 )
 
-const version = "0.5.0"
+const version = "0.6.0"
 
 var knownCommands = map[string]bool{
 	"read": true, "search": true, "create": true,
@@ -68,6 +68,12 @@ func main() {
 	if err != nil {
 		die("%v", err)
 	}
+
+	unlock, err := lockVault(vaultDir, isWriteCommand(cmd))
+	if err != nil {
+		die("cannot lock vault: %v", err)
+	}
+	defer unlock()
 
 	ts := flags["timestamps"]
 
