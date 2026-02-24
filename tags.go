@@ -90,10 +90,10 @@ func (v *Vault) Tags(sortBy string) ([]string, map[string]int, error) {
 		if err != nil {
 			return nil
 		}
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, v.dir) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}
@@ -150,10 +150,10 @@ func (v *Vault) Tag(tagName string) ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, v.dir) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}

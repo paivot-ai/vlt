@@ -93,10 +93,10 @@ func (v *Vault) Tasks(opts TaskOptions) ([]Task, error) {
 			return nil
 		}
 
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, searchRoot) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}

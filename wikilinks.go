@@ -74,10 +74,10 @@ func updateVaultLinks(vaultDir, oldTitle, newTitle string) (int, error) {
 			return nil
 		}
 
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, vaultDir) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}
@@ -116,10 +116,10 @@ func updateVaultMdLinks(vaultDir, oldRelPath, newRelPath string) (int, error) {
 			return nil
 		}
 
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, vaultDir) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}
@@ -201,10 +201,10 @@ func FindBacklinks(vaultDir, title string) ([]string, error) {
 			return nil
 		}
 
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, vaultDir) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}

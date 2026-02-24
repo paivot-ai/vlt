@@ -394,11 +394,11 @@ func (v *Vault) Search(opts SearchOptions) ([]SearchResult, error) {
 			return nil
 		}
 
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, searchRoot) {
 			return filepath.SkipDir
 		}
 
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}
@@ -522,11 +522,11 @@ func (v *Vault) SearchWithContext(opts SearchOptions) ([]ContextMatch, error) {
 			return nil
 		}
 
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, searchRoot) {
 			return filepath.SkipDir
 		}
 
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}
@@ -1132,10 +1132,10 @@ func (v *Vault) Orphans() ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, v.dir) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}
@@ -1164,10 +1164,10 @@ func (v *Vault) Orphans() ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, v.dir) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}
@@ -1218,10 +1218,10 @@ func (v *Vault) Unresolved() ([]UnresolvedLink, error) {
 		if err != nil {
 			return nil
 		}
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, v.dir) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}
@@ -1250,10 +1250,10 @@ func (v *Vault) Unresolved() ([]UnresolvedLink, error) {
 		if err != nil {
 			return nil
 		}
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, v.dir) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, ".md") {
 			return nil
 		}
@@ -1304,10 +1304,10 @@ func (v *Vault) Files(folder, ext string) ([]string, error) {
 		if err != nil {
 			return nil
 		}
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, searchRoot) {
 			return filepath.SkipDir
 		}
+		name := d.Name()
 		if d.IsDir() || !strings.HasSuffix(name, "."+ext) {
 			return nil
 		}

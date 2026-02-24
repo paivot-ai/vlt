@@ -133,6 +133,21 @@ func obsidianConfigPath() string {
 	return filepath.Join(configDir, "obsidian", "obsidian.json")
 }
 
+// skipHiddenDir reports whether a WalkDir callback should skip this directory.
+// Hidden directories (prefixed with ".") and ".trash" are skipped, except the
+// walk root itself -- a vault directory may legitimately be dot-prefixed
+// (e.g., ".vault") and must never be skipped.
+func skipHiddenDir(path string, d os.DirEntry, walkRoot string) bool {
+	if !d.IsDir() {
+		return false
+	}
+	if path == walkRoot {
+		return false
+	}
+	name := d.Name()
+	return strings.HasPrefix(name, ".") || name == ".trash"
+}
+
 // resolveNote finds a note by title within the vault.
 // First pass: exact filename match (<title>.md).
 // Second pass (if needed): checks frontmatter aliases.
@@ -146,11 +161,10 @@ func resolveNote(vaultDir, title string) (string, error) {
 		if err != nil {
 			return nil
 		}
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, vaultDir) {
 			return filepath.SkipDir
 		}
-		if !d.IsDir() && name == target {
+		if !d.IsDir() && d.Name() == target {
 			found = path
 			return filepath.SkipAll
 		}
@@ -166,11 +180,10 @@ func resolveNote(vaultDir, title string) (string, error) {
 		if err != nil {
 			return nil
 		}
-		name := d.Name()
-		if d.IsDir() && (strings.HasPrefix(name, ".") || name == ".trash") {
+		if skipHiddenDir(path, d, vaultDir) {
 			return filepath.SkipDir
 		}
-		if d.IsDir() || !strings.HasSuffix(name, ".md") {
+		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
 			return nil
 		}
 
