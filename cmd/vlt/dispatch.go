@@ -26,12 +26,40 @@ func printVaults(vaults map[string]string, format string) {
 	formatVaults(names, vaults, format)
 }
 
-func dispatchRead(v *vlt.Vault, params map[string]string) error {
+func dispatchRead(v *vlt.Vault, params map[string]string, flags map[string]bool) error {
 	title := params["file"]
 	if title == "" {
 		return fmt.Errorf("read requires file=\"<title>\"")
 	}
-	content, err := v.Read(title, params["heading"])
+	heading := params["heading"]
+
+	if flags["follow"] {
+		primary, linked, err := v.ReadFollow(title, heading)
+		if err != nil {
+			return err
+		}
+		fmt.Print(primary)
+		for _, ln := range linked {
+			fmt.Printf("\n--- [[%s]] (%s) ---\n", ln.Title, ln.Path)
+			fmt.Print(ln.Content)
+		}
+		return nil
+	}
+
+	if flags["backlinks"] {
+		primary, linked, err := v.ReadWithBacklinks(title, heading)
+		if err != nil {
+			return err
+		}
+		fmt.Print(primary)
+		for _, ln := range linked {
+			fmt.Printf("\n--- [[%s]] (%s) ---\n", ln.Title, ln.Path)
+			fmt.Print(ln.Content)
+		}
+		return nil
+	}
+
+	content, err := v.Read(title, heading)
 	if err != nil {
 		return err
 	}

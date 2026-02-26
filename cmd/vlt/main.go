@@ -16,7 +16,7 @@ import (
 	vlt "github.com/RamXX/vlt"
 )
 
-const version = "0.7.0"
+const version = "0.8.0"
 
 var knownCommands = map[string]bool{
 	"read": true, "search": true, "create": true,
@@ -85,7 +85,7 @@ func main() {
 	// Dispatch
 	switch cmd {
 	case "read":
-		err = dispatchRead(v, params)
+		err = dispatchRead(v, params, flags)
 	case "search":
 		err = dispatchSearch(v, params, format)
 	case "create":
@@ -207,7 +207,7 @@ Usage:
   vlt vault="<name>" <command> [args...]
 
 File commands:
-  read           file="<title>" [heading="<heading>"]         Read a note (or a specific section)
+  read           file="<title>" [heading="<heading>"] [follow] [backlinks]  Read a note (with linked context)
   create         name="<title>" path="<path>" [content=...] [silent] [timestamps]  Create a note
   append         file="<title>" [content="<text>"] [timestamps]      Append to end of note
   prepend        file="<title>" [content="<text>"] [timestamps]      Prepend after frontmatter
@@ -268,6 +268,8 @@ Options:
   total            Show count instead of listing files.
   done             Show only completed tasks.
   pending          Show only pending tasks.
+  follow           Include full content of forward-linked notes (read only).
+  backlinks        Include full content of notes linking to this one (read only).
   --json           Output in JSON format.
   --yaml           Output in YAML format.
   --csv            Output in CSV format.
@@ -300,6 +302,8 @@ Library usage:
 Examples:
   vlt vault="AgentVault" read file="Operating Mode"
   vlt vault="AgentVault" read file="Design Doc" heading="## Architecture"
+  vlt vault="AgentVault" read file="Design Doc" follow
+  vlt vault="AgentVault" read file="Session Operating Mode" backlinks
   vlt vault="ProjectVault" search query="architecture"
   vlt vault="ProjectVault" search query="[status:active] [type:decision]"
   vlt vault="AgentVault" create name="My Note" path="_inbox/My Note.md" content="# Hello" silent

@@ -330,6 +330,127 @@ func (v *Vault) Read(title, heading string) (string, error) {
 	return output, nil
 }
 
+// LinkedNote holds a related note's title and content, returned by ReadFollow
+// and ReadWithBacklinks.
+type LinkedNote struct {
+	Title   string // note title (stem of filename)
+	Path    string // vault-relative path
+	Content string // full file content
+}
+
+// ReadFollow returns the content of the requested note plus the full content
+// of every note it forward-links to (depth 1). This lets callers retrieve a
+// note's entire link neighborhood in a single call.
+func (v *Vault) ReadFollow(title, heading string) (string, []LinkedNote, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	path, err := resolveNote(v.dir, title)
+	if err != nil {
+		return "", nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", nil, err
+	}
+
+	primary := string(data)
+	if heading != "" {
+		lines := strings.Split(primary, "\n")
+		bounds, found := findSection(lines, heading)
+		if !found {
+			return "", nil, fmt.Errorf("heading %q not found in %q", heading, title)
+		}
+		section := lines[bounds.HeadingLine:bounds.ContentEnd]
+		primary = strings.Join(section, "\n")
+		if !strings.HasSuffix(primary, "\n") {
+			primary += "\n"
+		}
+	}
+
+	// Parse outgoing wikilinks from the full file (even if heading-scoped)
+	links := ParseWikilinks(string(data))
+	seen := make(map[string]bool)
+	var linked []LinkedNote
+	for _, wl := range links {
+		if wl.Title == title || seen[wl.Title] {
+			continue
+		}
+		seen[wl.Title] = true
+
+		linkedPath, resolveErr := resolveNote(v.dir, wl.Title)
+		if resolveErr != nil {
+			continue // skip broken links
+		}
+		linkedData, readErr := os.ReadFile(linkedPath)
+		if readErr != nil {
+			continue
+		}
+		relPath, _ := filepath.Rel(v.dir, linkedPath)
+		linked = append(linked, LinkedNote{
+			Title:   wl.Title,
+			Path:    relPath,
+			Content: string(linkedData),
+		})
+	}
+
+	return primary, linked, nil
+}
+
+// ReadWithBacklinks returns the content of the requested note plus the full
+// content of every note that links TO it (depth 1 backlinks).
+func (v *Vault) ReadWithBacklinks(title, heading string) (string, []LinkedNote, error) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	path, err := resolveNote(v.dir, title)
+	if err != nil {
+		return "", nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", nil, err
+	}
+
+	primary := string(data)
+	if heading != "" {
+		lines := strings.Split(primary, "\n")
+		bounds, found := findSection(lines, heading)
+		if !found {
+			return "", nil, fmt.Errorf("heading %q not found in %q", heading, title)
+		}
+		section := lines[bounds.HeadingLine:bounds.ContentEnd]
+		primary = strings.Join(section, "\n")
+		if !strings.HasSuffix(primary, "\n") {
+			primary += "\n"
+		}
+	}
+
+	blPaths, err := FindBacklinks(v.dir, title)
+	if err != nil {
+		return primary, nil, err
+	}
+
+	var linked []LinkedNote
+	for _, relPath := range blPaths {
+		absPath := filepath.Join(v.dir, relPath)
+		blData, readErr := os.ReadFile(absPath)
+		if readErr != nil {
+			continue
+		}
+		blTitle := strings.TrimSuffix(filepath.Base(relPath), ".md")
+		linked = append(linked, LinkedNote{
+			Title:   blTitle,
+			Path:    relPath,
+			Content: string(blData),
+		})
+	}
+
+	return primary, linked, nil
+}
+
 // Search finds notes whose title or content matches opts.Query or opts.Regex.
 // Property filters embedded in opts.Query ([key:value]) are also applied.
 // Returns results without context lines. For context-aware search use SearchWithContext.

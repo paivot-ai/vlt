@@ -88,6 +88,12 @@ vlt vault="MyVault" read file="Daily Note"
 # Read a specific section
 vlt vault="MyVault" read file="Design Doc" heading="## Architecture"
 
+# Read a note plus all notes it links to (depth 1)
+vlt vault="MyVault" read file="Design Doc" follow
+
+# Read a note plus all notes that link to it
+vlt vault="MyVault" read file="Session Operating Mode" backlinks
+
 # Search by title and content
 vlt vault="MyVault" search query="architecture"
 
@@ -133,7 +139,7 @@ vlt search query="architecture"
 
 | Command | Description |
 |---------|-------------|
-| `read file="<title>" [heading="<heading>"]` | Print note content (or a specific section) |
+| `read file="<title>" [heading="<heading>"] [follow] [backlinks]` | Print note content (with linked context) |
 | `create name="<title>" path="<path>" [content=...] [silent] [timestamps]` | Create a new note |
 | `append file="<title>" [content="<text>"] [timestamps]` | Append content to end of note |
 | `prepend file="<title>" [content="<text>"] [timestamps]` | Insert content after frontmatter |

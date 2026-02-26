@@ -39,8 +39,11 @@ vlt vault="Claude" search query="[type:pattern] [stack:go]"
 # Check for known sharp edges in this domain
 vlt vault="Claude" search query="[type:debug] [project:<name>]"
 
-# Read the project index note
-vlt vault="Claude" read file="projects/<project-name>"
+# Read the project index note + everything it links to (one call)
+vlt vault="Claude" read file="projects/<project-name>" follow
+
+# Read a decision and see what references it
+vlt vault="Claude" read file="<Decision Note>" backlinks
 ```
 
 ### Phase 2: Capture During Work

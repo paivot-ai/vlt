@@ -73,7 +73,7 @@ All listing commands support structured output:
 
 | Command | Purpose | Key Parameters |
 |---------|---------|----------------|
-| `read` | Print note content | `file=`, `heading=` (optional section) |
+| `read` | Print note content | `file=`, `heading=`, `follow`, `backlinks` |
 | `create` | Create a new note | `name=`, `path=`, `content=`, `silent`, `timestamps` |
 | `append` | Add content to end | `file=`, `content=` (or stdin) |
 | `prepend` | Insert after frontmatter | `file=`, `content=` (or stdin) |

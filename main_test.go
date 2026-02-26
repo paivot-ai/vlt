@@ -1810,6 +1810,169 @@ func TestReadHeadingNotFoundIntegration(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ReadFollow / ReadWithBacklinks tests
+// ---------------------------------------------------------------------------
+
+func TestReadFollow_ReturnsLinkedNotes(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	os.WriteFile(filepath.Join(vaultDir, "Main.md"), []byte("# Main\n\nSee [[Alpha]] and [[Beta]].\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Alpha.md"), []byte("# Alpha\n\nAlpha content.\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Beta.md"), []byte("# Beta\n\nBeta content.\n"), 0644)
+
+	primary, linked, err := v.ReadFollow("Main", "")
+	if err != nil {
+		t.Fatalf("ReadFollow: %v", err)
+	}
+	if !strings.Contains(primary, "See [[Alpha]]") {
+		t.Error("primary content missing")
+	}
+	if len(linked) != 2 {
+		t.Fatalf("expected 2 linked notes, got %d", len(linked))
+	}
+
+	titles := make(map[string]bool)
+	for _, ln := range linked {
+		titles[ln.Title] = true
+		if ln.Content == "" {
+			t.Errorf("linked note %q has empty content", ln.Title)
+		}
+		if ln.Path == "" {
+			t.Errorf("linked note %q has empty path", ln.Title)
+		}
+	}
+	if !titles["Alpha"] || !titles["Beta"] {
+		t.Errorf("expected Alpha and Beta, got %v", titles)
+	}
+}
+
+func TestReadFollow_SkipsBrokenLinks(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	os.WriteFile(filepath.Join(vaultDir, "Main.md"), []byte("# Main\n\nSee [[Exists]] and [[Missing]].\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Exists.md"), []byte("# Exists\n\nHere.\n"), 0644)
+
+	_, linked, err := v.ReadFollow("Main", "")
+	if err != nil {
+		t.Fatalf("ReadFollow: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Fatalf("expected 1 linked note (broken skipped), got %d", len(linked))
+	}
+	if linked[0].Title != "Exists" {
+		t.Errorf("expected Exists, got %s", linked[0].Title)
+	}
+}
+
+func TestReadFollow_DeduplicatesLinks(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	os.WriteFile(filepath.Join(vaultDir, "Main.md"), []byte("# Main\n\n[[Alpha]] and again [[Alpha]].\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Alpha.md"), []byte("# Alpha\n"), 0644)
+
+	_, linked, err := v.ReadFollow("Main", "")
+	if err != nil {
+		t.Fatalf("ReadFollow: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Errorf("expected 1 linked note (deduplicated), got %d", len(linked))
+	}
+}
+
+func TestReadFollow_SkipsSelfLinks(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	os.WriteFile(filepath.Join(vaultDir, "Main.md"), []byte("# Main\n\n[[Main]] and [[Alpha]].\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Alpha.md"), []byte("# Alpha\n"), 0644)
+
+	_, linked, err := v.ReadFollow("Main", "")
+	if err != nil {
+		t.Fatalf("ReadFollow: %v", err)
+	}
+	if len(linked) != 1 {
+		t.Errorf("expected 1 linked note (self-link skipped), got %d", len(linked))
+	}
+}
+
+func TestReadFollow_WithHeading(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	os.WriteFile(filepath.Join(vaultDir, "Main.md"), []byte("## Part A\ncontent a\n[[Alpha]]\n## Part B\ncontent b\n[[Beta]]\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Alpha.md"), []byte("# Alpha\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Beta.md"), []byte("# Beta\n"), 0644)
+
+	primary, linked, err := v.ReadFollow("Main", "## Part A")
+	if err != nil {
+		t.Fatalf("ReadFollow with heading: %v", err)
+	}
+	if !strings.Contains(primary, "content a") {
+		t.Error("primary should contain section A")
+	}
+	if strings.Contains(primary, "content b") {
+		t.Error("primary should NOT contain section B")
+	}
+	// Follow includes ALL links from the full note (not just the section)
+	if len(linked) != 2 {
+		t.Errorf("expected 2 linked notes from full note, got %d", len(linked))
+	}
+}
+
+func TestReadWithBacklinks_ReturnsBacklinkers(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	os.WriteFile(filepath.Join(vaultDir, "Target.md"), []byte("# Target\n\nTarget content.\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Referrer A.md"), []byte("# A\n\nSee [[Target]] for details.\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Referrer B.md"), []byte("# B\n\nAlso [[Target]].\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Unrelated.md"), []byte("# Unrelated\n\nNo links.\n"), 0644)
+
+	primary, linked, err := v.ReadWithBacklinks("Target", "")
+	if err != nil {
+		t.Fatalf("ReadWithBacklinks: %v", err)
+	}
+	if !strings.Contains(primary, "Target content") {
+		t.Error("primary content missing")
+	}
+	if len(linked) != 2 {
+		t.Fatalf("expected 2 backlinks, got %d", len(linked))
+	}
+
+	titles := make(map[string]bool)
+	for _, ln := range linked {
+		titles[ln.Title] = true
+		if ln.Content == "" {
+			t.Errorf("backlink note %q has empty content", ln.Title)
+		}
+	}
+	if !titles["Referrer A"] || !titles["Referrer B"] {
+		t.Errorf("expected Referrer A and Referrer B, got %v", titles)
+	}
+}
+
+func TestReadWithBacklinks_NoBacklinks(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	os.WriteFile(filepath.Join(vaultDir, "Orphan.md"), []byte("# Orphan\n\nNo one links here.\n"), 0644)
+
+	primary, linked, err := v.ReadWithBacklinks("Orphan", "")
+	if err != nil {
+		t.Fatalf("ReadWithBacklinks: %v", err)
+	}
+	if !strings.Contains(primary, "No one links here") {
+		t.Error("primary content missing")
+	}
+	if len(linked) != 0 {
+		t.Errorf("expected 0 backlinks, got %d", len(linked))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // search context tests (VLT-hha)
 // ---------------------------------------------------------------------------
 

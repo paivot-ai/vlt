@@ -26,22 +26,31 @@ Environment variables:
 
 ### read
 
-Print note content, optionally scoped to a specific heading section.
+Print note content, optionally scoped to a specific heading section. Can include forward-linked or back-linked notes for graph-aware retrieval.
 
 ```bash
 vlt vault="V" read file="Note Title"
 vlt vault="V" read file="Note Title" heading="## Section Name"
+vlt vault="V" read file="Note Title" follow
+vlt vault="V" read file="Note Title" backlinks
 ```
 
 **Parameters:**
 - `file=` (required) -- Note title or alias
 - `heading=` (optional) -- Heading to scope output to (include `#` prefix)
 
+**Flags:**
+- `follow` -- After the primary note, append the full content of every note it links to (depth 1 forward links). Broken links are silently skipped. Self-links and duplicates are excluded.
+- `backlinks` -- After the primary note, append the full content of every note that links TO it (depth 1 backlinks).
+
 **Behavior:**
 - Outputs the full note content to stdout
-- When `heading=` is specified, outputs only that section (heading through next same-or-higher-level heading)
+- When `heading=` is specified, the primary output is scoped to that section, but `follow` still resolves links from the full note
+- When `follow` or `backlinks` is used, linked notes are separated by `--- [[Title]] (path) ---` delimiters
 - Resolves notes by filename first, then by alias
 - Exit 1 if note not found
+
+**Why use follow/backlinks:** Retrieves a note's link neighborhood in a single call. Without these flags, an agent would need N+1 calls (read the note, parse links, read each linked note). With `follow`, it's one call.
 
 ---
 
