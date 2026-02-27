@@ -150,7 +150,10 @@ func (v *Vault) Daily(dateStr string) (DailyResult, error) {
 		relPath = filepath.Join(config.Folder, filename)
 	}
 
-	fullPath := filepath.Join(v.dir, relPath)
+	fullPath, pathErr := safePath(v.dir, relPath)
+	if pathErr != nil {
+		return DailyResult{}, fmt.Errorf("daily note path: %w", pathErr)
+	}
 
 	// If note exists, read and return it
 	if data, err := os.ReadFile(fullPath); err == nil {
@@ -164,15 +167,17 @@ func (v *Vault) Daily(dateStr string) (DailyResult, error) {
 	// Note doesn't exist -- create it
 	var content string
 	if config.Template != "" {
-		tmplPath := filepath.Join(v.dir, config.Template)
-		if !strings.HasSuffix(tmplPath, ".md") {
-			tmplPath += ".md"
+		tmplRel := config.Template
+		if !strings.HasSuffix(tmplRel, ".md") {
+			tmplRel += ".md"
 		}
-		if tmplData, err := os.ReadFile(tmplPath); err == nil {
-			content = string(tmplData)
-			// Replace common template variables
-			content = strings.ReplaceAll(content, "{{date}}", date.Format("2006-01-02"))
-			content = strings.ReplaceAll(content, "{{title}}", date.Format(config.Format))
+		if tmplPath, tmplErr := safePath(v.dir, tmplRel); tmplErr == nil {
+			if tmplData, err := os.ReadFile(tmplPath); err == nil {
+				content = string(tmplData)
+				// Replace common template variables
+				content = strings.ReplaceAll(content, "{{date}}", date.Format("2006-01-02"))
+				content = strings.ReplaceAll(content, "{{title}}", date.Format(config.Format))
+			}
 		}
 	}
 

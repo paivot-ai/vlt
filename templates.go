@@ -120,9 +120,13 @@ func (v *Vault) TemplatesApply(templateName, noteName, notePath string) error {
 	}
 
 	// Resolve template file
-	tmplPath := filepath.Join(v.dir, folder, templateName)
-	if !strings.HasSuffix(tmplPath, ".md") {
-		tmplPath += ".md"
+	tmplRel := filepath.Join(folder, templateName)
+	if !strings.HasSuffix(tmplRel, ".md") {
+		tmplRel += ".md"
+	}
+	tmplPath, pathErr := safePath(v.dir, tmplRel)
+	if pathErr != nil {
+		return fmt.Errorf("template path: %w", pathErr)
 	}
 
 	tmplData, err := os.ReadFile(tmplPath)
@@ -131,7 +135,10 @@ func (v *Vault) TemplatesApply(templateName, noteName, notePath string) error {
 	}
 
 	// Check target doesn't already exist
-	fullPath := filepath.Join(v.dir, notePath)
+	fullPath, pathErr := safePath(v.dir, notePath)
+	if pathErr != nil {
+		return fmt.Errorf("note path: %w", pathErr)
+	}
 	if _, err := os.Stat(fullPath); err == nil {
 		return fmt.Errorf("note already exists: %s", notePath)
 	}

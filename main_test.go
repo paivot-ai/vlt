@@ -2760,3 +2760,135 @@ func containsSubstring(s, sub string) bool {
 	}
 	return false
 }
+
+// ---------------------------------------------------------------------------
+// Path traversal boundary tests
+// ---------------------------------------------------------------------------
+
+func TestSafePath(t *testing.T) {
+	vaultDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{"simple relative", "notes/foo.md", false},
+		{"nested", "a/b/c.md", false},
+		{"dot-slash", ".", false},
+		{"traversal parent", "../outside.md", true},
+		{"traversal nested", "notes/../../outside.md", true},
+		{"traversal deep", "a/b/c/../../../../etc/passwd", true},
+		{"absolute path", "/etc/passwd", true},
+		{"empty path", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := safePath(vaultDir, tt.path)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("safePath(%q) = %q, want error", tt.path, result)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("safePath(%q) error: %v", tt.path, err)
+				}
+				if !strings.HasPrefix(result, filepath.Clean(vaultDir)) {
+					t.Errorf("safePath(%q) = %q, not inside vault %s", tt.path, result, vaultDir)
+				}
+			}
+		})
+	}
+}
+
+func TestCreatePathTraversal(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	err := v.Create("evil", "../outside.md", "pwned", true, false)
+	if err == nil {
+		t.Fatal("Create with traversal path should fail")
+	}
+	if !strings.Contains(err.Error(), "path escapes vault boundary") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMovePathTraversal(t *testing.T) {
+	vaultDir := t.TempDir()
+	os.WriteFile(filepath.Join(vaultDir, "legit.md"), []byte("# Legit\n"), 0644)
+	v := &Vault{dir: vaultDir}
+
+	// Traversal in source
+	_, err := v.Move("../outside.md", "target.md")
+	if err == nil {
+		t.Fatal("Move with traversal source should fail")
+	}
+
+	// Traversal in destination
+	_, err = v.Move("legit.md", "../outside.md")
+	if err == nil {
+		t.Fatal("Move with traversal destination should fail")
+	}
+}
+
+func TestDeletePathTraversal(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	_, err := v.Delete("", "../outside.md", true)
+	if err == nil {
+		t.Fatal("Delete with traversal path should fail")
+	}
+}
+
+func TestFilesPathTraversal(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	_, err := v.Files("../", "md")
+	if err == nil {
+		t.Fatal("Files with traversal folder should fail")
+	}
+}
+
+func TestSearchPathTraversal(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	_, err := v.Search(SearchOptions{Query: "test", Path: "../../"})
+	if err == nil {
+		t.Fatal("Search with traversal path should fail")
+	}
+}
+
+func TestTasksPathTraversal(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir}
+
+	_, err := v.Tasks(TaskOptions{Path: "../../"})
+	if err == nil {
+		t.Fatal("Tasks with traversal path should fail")
+	}
+}
+
+func TestTemplatesApplyPathTraversal(t *testing.T) {
+	vaultDir := t.TempDir()
+	// Create a templates folder and a template
+	os.MkdirAll(filepath.Join(vaultDir, "templates"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "templates", "default.md"), []byte("# Template\n"), 0644)
+	v := &Vault{dir: vaultDir}
+
+	// Traversal in template name
+	err := v.TemplatesApply("../../etc/passwd", "Note", "notes/Note.md")
+	if err == nil {
+		t.Fatal("TemplatesApply with traversal template should fail")
+	}
+
+	// Traversal in note path
+	err = v.TemplatesApply("default", "Note", "../outside.md")
+	if err == nil {
+		t.Fatal("TemplatesApply with traversal note path should fail")
+	}
+}

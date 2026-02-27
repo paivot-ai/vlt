@@ -495,7 +495,11 @@ func (v *Vault) Search(opts SearchOptions) ([]SearchResult, error) {
 
 	searchRoot := v.dir
 	if opts.Path != "" {
-		searchRoot = filepath.Join(v.dir, opts.Path)
+		var pathErr error
+		searchRoot, pathErr = safePath(v.dir, opts.Path)
+		if pathErr != nil {
+			return nil, fmt.Errorf("search path: %w", pathErr)
+		}
 		if _, err := os.Stat(searchRoot); os.IsNotExist(err) {
 			return nil, fmt.Errorf("path filter %q not found in vault", opts.Path)
 		}
@@ -621,7 +625,11 @@ func (v *Vault) SearchWithContext(opts SearchOptions) ([]ContextMatch, error) {
 
 	searchRoot := v.dir
 	if opts.Path != "" {
-		searchRoot = filepath.Join(v.dir, opts.Path)
+		var pathErr error
+		searchRoot, pathErr = safePath(v.dir, opts.Path)
+		if pathErr != nil {
+			return nil, fmt.Errorf("search path: %w", pathErr)
+		}
 		if _, err := os.Stat(searchRoot); os.IsNotExist(err) {
 			return nil, fmt.Errorf("path filter %q not found in vault", opts.Path)
 		}
@@ -775,7 +783,10 @@ func (v *Vault) Create(name, path, content string, silent, timestamps bool) erro
 		return fmt.Errorf("create requires name and path")
 	}
 
-	fullPath := filepath.Join(v.dir, path)
+	fullPath, err := safePath(v.dir, path)
+	if err != nil {
+		return fmt.Errorf("create: %w", err)
+	}
 
 	// Don't overwrite existing notes.
 	if _, err := os.Stat(fullPath); err == nil {
@@ -1000,8 +1011,14 @@ func (v *Vault) Move(from, to string) (MoveResult, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	fromPath := filepath.Join(v.dir, from)
-	toPath := filepath.Join(v.dir, to)
+	fromPath, err := safePath(v.dir, from)
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("move source: %w", err)
+	}
+	toPath, err := safePath(v.dir, to)
+	if err != nil {
+		return MoveResult{}, fmt.Errorf("move destination: %w", err)
+	}
 
 	if _, err := os.Stat(fromPath); os.IsNotExist(err) {
 		return MoveResult{}, fmt.Errorf("source not found: %s", from)
@@ -1051,7 +1068,11 @@ func (v *Vault) Delete(title, notePath string, permanent bool) (string, error) {
 	var fullPath string
 
 	if notePath != "" {
-		fullPath = filepath.Join(v.dir, notePath)
+		var pathErr error
+		fullPath, pathErr = safePath(v.dir, notePath)
+		if pathErr != nil {
+			return "", fmt.Errorf("delete: %w", pathErr)
+		}
 	} else if title != "" {
 		resolved, err := resolveNote(v.dir, title)
 		if err != nil {
@@ -1413,7 +1434,11 @@ func (v *Vault) Files(folder, ext string) ([]string, error) {
 
 	searchRoot := v.dir
 	if folder != "" {
-		searchRoot = filepath.Join(v.dir, folder)
+		var pathErr error
+		searchRoot, pathErr = safePath(v.dir, folder)
+		if pathErr != nil {
+			return nil, fmt.Errorf("files folder: %w", pathErr)
+		}
 		if _, err := os.Stat(searchRoot); os.IsNotExist(err) {
 			return nil, fmt.Errorf("folder not found: %s", folder)
 		}

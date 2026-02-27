@@ -56,13 +56,23 @@ type vaultEntry struct {
 // If name looks like an absolute path, it's used directly.
 // Otherwise, it's looked up by directory basename in the Obsidian config.
 func resolveVault(name string) (string, error) {
-	// Direct path
+	// Direct absolute path
 	if strings.HasPrefix(name, "/") {
 		return validateVaultDir(name)
 	}
+	// Home-relative path
 	if strings.HasPrefix(name, "~") {
 		home, _ := os.UserHomeDir()
 		return validateVaultDir(filepath.Join(home, name[1:]))
+	}
+	// Relative path (e.g., ".vault/knowledge", "./subdir") -- resolve against CWD.
+	if strings.HasPrefix(name, ".") {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("cannot resolve relative vault path: %w", err)
+		}
+		abs := filepath.Join(cwd, name)
+		return validateVaultDir(abs)
 	}
 
 	// Look up by name
@@ -96,6 +106,32 @@ func validateVaultDir(path string) (string, error) {
 		return "", fmt.Errorf("vault path is not a directory: %s", path)
 	}
 	return path, nil
+}
+
+// ErrPathTraversal is returned when a user-supplied path escapes the vault root.
+var ErrPathTraversal = fmt.Errorf("path escapes vault boundary")
+
+// safePath validates that a user-supplied relative path, when joined with the
+// vault root, stays within the vault. Returns the cleaned absolute path.
+// Rejects absolute paths, paths containing "..", and any result that does not
+// start with the vault root prefix.
+func safePath(vaultDir, userPath string) (string, error) {
+	if userPath == "" {
+		return "", fmt.Errorf("empty path")
+	}
+	// Reject absolute paths -- user paths must be vault-relative.
+	if filepath.IsAbs(userPath) {
+		return "", ErrPathTraversal
+	}
+	joined := filepath.Join(vaultDir, userPath)
+	cleaned := filepath.Clean(joined)
+	// The cleaned path must be under vaultDir (or equal for edge cases).
+	// Use vaultDir+"/" so that "/tmp/vault2" is not treated as inside "/tmp/vault".
+	vaultPrefix := filepath.Clean(vaultDir) + string(filepath.Separator)
+	if cleaned != filepath.Clean(vaultDir) && !strings.HasPrefix(cleaned, vaultPrefix) {
+		return "", ErrPathTraversal
+	}
+	return cleaned, nil
 }
 
 // DiscoverVaults reads the Obsidian config file and returns a map of

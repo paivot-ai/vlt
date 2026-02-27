@@ -80,7 +80,11 @@ func (v *Vault) Tasks(opts TaskOptions) ([]Task, error) {
 	// Vault-wide mode
 	searchRoot := v.dir
 	if opts.Path != "" {
-		searchRoot = filepath.Join(v.dir, opts.Path)
+		var pathErr error
+		searchRoot, pathErr = safePath(v.dir, opts.Path)
+		if pathErr != nil {
+			return nil, fmt.Errorf("tasks path: %w", pathErr)
+		}
 		if _, err := os.Stat(searchRoot); os.IsNotExist(err) {
 			return nil, fmt.Errorf("path filter %q not found in vault", opts.Path)
 		}
