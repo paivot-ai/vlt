@@ -144,6 +144,9 @@ func dispatchCreate(v *vlt.Vault, params map[string]string, silent bool, timesta
 	if content == "" {
 		content = readStdinIfPiped()
 	}
+	if content == "" {
+		return fmt.Errorf("no content provided (use content=\"...\" or pipe to stdin)")
+	}
 
 	err := v.Create(name, notePath, content, silent, timestamps)
 	if err != nil {

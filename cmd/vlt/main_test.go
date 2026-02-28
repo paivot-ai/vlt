@@ -152,3 +152,45 @@ func TestDispatchWriteAcceptsContent(t *testing.T) {
 		t.Error("old body still present")
 	}
 }
+
+func TestDispatchCreateRejectsEmptyContent(t *testing.T) {
+	dir := t.TempDir()
+	v, err := vlt.Open(dir)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+
+	params := map[string]string{"name": "Empty", "path": "Empty.md"}
+	err = dispatchCreate(v, params, false, false)
+	if err == nil {
+		t.Fatal("expected error for empty content, got nil")
+	}
+	if !strings.Contains(err.Error(), "no content provided") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+
+	// Verify no file was created
+	if _, statErr := os.Stat(filepath.Join(dir, "Empty.md")); statErr == nil {
+		t.Error("empty file was created despite rejection")
+	}
+}
+
+func TestDispatchCreateAcceptsFrontmatterOnly(t *testing.T) {
+	dir := t.TempDir()
+	v, err := vlt.Open(dir)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+
+	fm := "---\ntype: note\nstatus: active\n---\n"
+	params := map[string]string{"name": "FMOnly", "path": "FMOnly.md", "content": fm}
+	err = dispatchCreate(v, params, false, false)
+	if err != nil {
+		t.Fatalf("create with frontmatter-only: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(dir, "FMOnly.md"))
+	if !strings.Contains(string(data), "type: note") {
+		t.Error("frontmatter not written")
+	}
+}
