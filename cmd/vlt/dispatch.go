@@ -200,6 +200,9 @@ func dispatchWrite(v *vlt.Vault, params map[string]string, timestamps bool) erro
 	if content == "" {
 		content = readStdinIfPiped()
 	}
+	if content == "" {
+		return fmt.Errorf("no content provided (use content=\"...\" or pipe to stdin)")
+	}
 	return v.Write(title, content, timestamps)
 }
 

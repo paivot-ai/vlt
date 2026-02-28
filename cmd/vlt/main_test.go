@@ -1,6 +1,13 @@
 package main
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	vlt "github.com/RamXX/vlt"
+)
 
 func TestParseArgs(t *testing.T) {
 	tests := []struct {
@@ -90,5 +97,58 @@ func TestParseArgs(t *testing.T) {
 				t.Errorf("got %d flags, want %d", len(flags), len(tt.wantFlags))
 			}
 		})
+	}
+}
+
+func TestDispatchWriteRejectsEmptyContent(t *testing.T) {
+	dir := t.TempDir()
+	notePath := filepath.Join(dir, "Note.md")
+	os.WriteFile(notePath, []byte("---\ntype: note\n---\n\n# Body\n"), 0644)
+
+	v, err := vlt.Open(dir)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+
+	// No content= param, no stdin -- dispatch should reject
+	params := map[string]string{"file": "Note"}
+	err = dispatchWrite(v, params, false)
+	if err == nil {
+		t.Fatal("expected error for empty content, got nil")
+	}
+	if !strings.Contains(err.Error(), "no content provided") {
+		t.Errorf("unexpected error message: %v", err)
+	}
+
+	// Verify original body is untouched
+	data, _ := os.ReadFile(notePath)
+	if !strings.Contains(string(data), "# Body") {
+		t.Error("note body was modified despite empty content rejection")
+	}
+}
+
+func TestDispatchWriteAcceptsContent(t *testing.T) {
+	dir := t.TempDir()
+	notePath := filepath.Join(dir, "Note.md")
+	os.WriteFile(notePath, []byte("---\ntype: note\n---\n\n# Old Body\n"), 0644)
+
+	v, err := vlt.Open(dir)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+
+	params := map[string]string{"file": "Note", "content": "# New Body\n"}
+	err = dispatchWrite(v, params, false)
+	if err != nil {
+		t.Fatalf("write with content: %v", err)
+	}
+
+	data, _ := os.ReadFile(notePath)
+	got := string(data)
+	if !strings.Contains(got, "# New Body") {
+		t.Error("new body not written")
+	}
+	if strings.Contains(got, "# Old Body") {
+		t.Error("old body still present")
 	}
 }
