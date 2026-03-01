@@ -1,16 +1,18 @@
 .PHONY: help build install install-skill test clean
 
 AGENT ?= claude
+VERSION := $(shell git describe --tags --always 2>/dev/null || echo dev)
+LDFLAGS := -X main.version=$(VERSION)
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 
 build: ## Build vlt binary
-	go build -o vlt ./cmd/vlt
+	go build -ldflags "$(LDFLAGS)" -o vlt ./cmd/vlt
 
 install: ## Install vlt to $GOPATH/bin
-	go install ./cmd/vlt
+	go install -ldflags "$(LDFLAGS)" ./cmd/vlt
 
 install-skill: ## Install vlt skill for an AI agent (AGENT=claude|codex|opencode)
 	@case "$(AGENT)" in \

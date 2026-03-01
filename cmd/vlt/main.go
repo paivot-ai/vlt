@@ -16,7 +16,9 @@ import (
 	vlt "github.com/RamXX/vlt"
 )
 
-const version = "0.9.2"
+// version is set at build time via ldflags. Falls back to "dev" for
+// untagged builds (e.g., go install without -ldflags).
+var version = "dev"
 
 var knownCommands = map[string]bool{
 	"read": true, "search": true, "create": true,
