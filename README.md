@@ -659,7 +659,7 @@ _ = vault.Append("Daily Log", "New entry", false)
 - **Case-insensitive link matching** -- Mirrors Obsidian's behavior. `[[my note]]` resolves to `My Note.md`.
 - **Simple frontmatter parsing** -- String-based YAML parsing handles Obsidian's common patterns (key-value, inline lists, block lists) without pulling in a full YAML library.
 - **Inert zone masking** -- Before scanning for links, tags, or references, content inside code blocks, comments, and math expressions is masked out to prevent false positives. Each pass preserves byte offsets and line numbers so that all downstream operations remain position-accurate.
-- **Vault-level advisory locking** -- Multiple vlt processes can safely operate on the same vault concurrently. Write commands (`create`, `append`, `move`, etc.) acquire an exclusive `flock(2)` lock; read commands acquire a shared lock. The lock is kernel-managed via `.vlt.lock` in the vault root, so it auto-releases on process crash or kill -- no stale lock cleanup needed.
+- **Vault-level advisory locking** -- Multiple vlt processes can safely operate on the same vault concurrently. Write commands (`create`, `append`, `move`, etc.) acquire an exclusive `flock(2)` lock. Read commands are lock-free by default so they never block behind a writer; pass `--strict-flock` when you want reads to acquire a shared lock. The lock is kernel-managed via `.vlt.lock` in the vault root, so it auto-releases on process crash or kill -- no stale lock cleanup needed.
 - **File integrity registry** -- Every write path registers a SHA-256 content hash in `~/.vlt/registries/<vault-id>/registry.json`. On read, the hash is verified and an `IntegrityStatus` (OK, Untracked, Mismatch, NoRegistry) is returned. This detects modifications made outside vlt without blocking them.
 - **Path traversal protection** -- All user-supplied paths are validated by `safePath()`, which rejects absolute paths, `..` traversals, and any result resolving outside the vault root. This prevents directory escape attacks in agentic workflows where file paths may come from untrusted input.
 - **Relative vault paths** -- In addition to vault names and absolute paths, vlt supports relative paths (e.g., `.vault/knowledge`) for vault resolution, aligning with embedded vault patterns used by plugins.
@@ -753,7 +753,7 @@ This will be an opt-in feature -- the zero-dependency linear scan remains the de
 
 ### Previously shipped (v0.6.0)
 
-- **Vault-level advisory locking** -- Multiple vlt processes can safely operate on the same vault concurrently. Write commands acquire exclusive `flock(2)` locks; read commands acquire shared locks. Kernel-managed via `.vlt.lock` -- auto-releases on crash.
+- **Vault-level advisory locking** -- Multiple vlt processes can safely operate on the same vault concurrently. Write commands acquire exclusive `flock(2)` locks. Reads are lock-free by default, with `--strict-flock` available when shared-lock reads are required. Kernel-managed via `.vlt.lock` -- auto-releases on crash.
 
 ### Previously shipped (v0.5.0)
 
