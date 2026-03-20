@@ -74,7 +74,7 @@ vlt vault="V" create name="Title" path="folder/Title.md" content="Body" silent t
 
 **Behavior:**
 - Creates parent directories as needed
-- Exits 1 if a file already exists at the path
+- Exits 0 with a stderr warning if a file already exists at the path (no-op)
 - Content may include frontmatter (fenced by `---`)
 
 ---
@@ -137,7 +137,7 @@ vlt vault="V" write file="Note" content="Completely new body."
 
 ### patch
 
-Targeted edits: replace or delete content by heading or line number.
+Targeted edits: replace or delete content by heading, line number, or find-and-replace.
 
 ```bash
 # Replace section under a heading
@@ -154,13 +154,20 @@ vlt vault="V" patch file="Note" line="10-15" content="Replacement block."
 
 # Delete lines
 vlt vault="V" patch file="Note" line="10-15" delete
+
+# Find and replace (file-wide)
+vlt vault="V" patch file="Note" old="old text" new="new text"
+
+# Find and replace (scoped to a heading)
+vlt vault="V" patch file="Note" heading="## Section" old="old text" new="new text"
 ```
 
 **Parameters:**
 - `file=` (required) -- Note title or alias
-- `heading=` (mutually exclusive with `line=`) -- Target heading (include `#` prefix)
-- `line=` (mutually exclusive with `heading=`) -- Line number or range (`N` or `N-M`)
+- `heading=` (optional) -- Target heading. Accepts `"## Section"` (exact level match) or `"Section"` (any level)
+- `line=` (optional, mutually exclusive with `heading=`) -- Line number or range (`N` or `N-M`)
 - `content=` (optional) -- Replacement content; if omitted, reads from stdin
+- `old=` + `new=` (optional) -- Find-and-replace mode. Can be scoped with `heading=` or `line=`
 
 **Flags:**
 - `delete` -- Delete the targeted section/lines instead of replacing
@@ -184,7 +191,7 @@ vlt vault="V" delete file="Note" permanent
 ```
 
 **Parameters:**
-- `file=` (required) -- Note title or alias
+- `file=` or `path=` (one required) -- Note title/alias or vault-relative path
 
 **Flags:**
 - `permanent` -- Hard-delete instead of moving to `.trash/`
@@ -359,6 +366,7 @@ vlt vault="V" search regex="pattern" query="[status:active]"
 - `query=` (optional) -- Text and/or `[key:value]` property filters
 - `regex=` (optional) -- Regular expression pattern (case-insensitive)
 - `context=` (optional) -- Number of surrounding context lines (like `grep -C`)
+- `path=` (optional) -- Restrict search to a vault subdirectory (e.g., `path="decisions"`)
 
 **Output modes:**
 - Default: One file path per line

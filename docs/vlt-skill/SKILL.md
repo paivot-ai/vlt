@@ -13,7 +13,7 @@ description: >-
   knowledge management.
   Provides comprehensive guidance for using vlt in agentic AI workflows,
   CI/CD pipelines, and shell scripting.
-version: 0.9.1
+version: 0.9.5
 ---
 
 # vlt -- Obsidian Vault CLI for Coding Agents
@@ -80,8 +80,8 @@ All listing commands support structured output:
 | `append` | Add content to end | `file=`, `content=` (or stdin) |
 | `prepend` | Insert after frontmatter | `file=`, `content=` (or stdin) |
 | `write` | Replace body, keep frontmatter | `file=`, `content=` (or stdin) |
-| `patch` | Edit by heading or line | `file=`, `heading=`/`line=`, `content=`/`delete` |
-| `delete` | Trash or hard-delete | `file=`, `permanent` (optional) |
+| `patch` | Edit by heading, line, or find-replace | `file=`, `heading=`/`line=`, `content=`/`delete`/`old=`+`new=` |
+| `delete` | Trash or hard-delete | `file=`/`path=`, `permanent` (optional) |
 | `move` | Rename with link repair | `path=`, `to=` |
 | `daily` | Create/read daily note | `date=` (optional, default today) |
 | `files` | List vault files | `folder=`, `ext=`, `total` (optional) |
@@ -107,7 +107,7 @@ All listing commands support structured output:
 
 | Command | Purpose | Key Parameters |
 |---------|---------|----------------|
-| `search` | Find by title, content, properties | `query=`, `regex=`, `context=` |
+| `search` | Find by title, content, properties | `query=`, `regex=`, `context=`, `path=` |
 | `tags` | List all tags | `counts`, `sort="count"` |
 | `tag` | Notes with a tag (hierarchical) | `tag=` |
 | `tasks` | List checkboxes | `file=`/`path=`, `done`/`pending` |
@@ -219,6 +219,12 @@ The heading must be unique within the note. If duplicate headings exist, patch r
 ```bash
 vlt vault="V" patch file="Note" line="5" content="Updated line."
 vlt vault="V" patch file="Note" line="10-15" content="Replaced block."
+```
+
+### Find and Replace
+```bash
+vlt vault="V" patch file="Note" old="old text" new="new text"                          # File-wide
+vlt vault="V" patch file="Note" heading="## Section" old="old text" new="new text"     # Within section
 ```
 
 ### Delete a Section
