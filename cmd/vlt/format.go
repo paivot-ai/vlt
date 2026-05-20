@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	vlt "github.com/RamXX/vlt"
+	vlt "github.com/paivot-ai/vlt"
 )
 
 // outputFormat extracts the output format from flags.

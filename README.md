@@ -1,8 +1,8 @@
 # vlt
 
-[![CI](https://github.com/RamXX/vlt/actions/workflows/ci.yml/badge.svg)](https://github.com/RamXX/vlt/actions/workflows/ci.yml)
-[![Release](https://github.com/RamXX/vlt/actions/workflows/release.yml/badge.svg)](https://github.com/RamXX/vlt/actions/workflows/release.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/RamXX/vlt)](https://goreportcard.com/report/github.com/RamXX/vlt)
+[![CI](https://github.com/paivot-ai/vlt/actions/workflows/ci.yml/badge.svg)](https://github.com/paivot-ai/vlt/actions/workflows/ci.yml)
+[![Release](https://github.com/paivot-ai/vlt/actions/workflows/release.yml/badge.svg)](https://github.com/paivot-ai/vlt/actions/workflows/release.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/paivot-ai/vlt)](https://goreportcard.com/report/github.com/paivot-ai/vlt)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 Fast, standalone CLI for Obsidian vault operations. No Electron, no app dependency, no network calls. Just your vault and the filesystem.
@@ -60,13 +60,13 @@ For straightforward vaults -- plain notes, frontmatter, wikilinks, tags -- this 
 ### From source (requires Go 1.24+)
 
 ```bash
-go install github.com/RamXX/vlt/cmd/vlt@latest
+go install github.com/paivot-ai/vlt/cmd/vlt@latest
 ```
 
 Or build from a local clone:
 
 ```bash
-git clone https://github.com/RamXX/vlt.git
+git clone https://github.com/paivot-ai/vlt.git
 cd vlt
 make build     # produces ./vlt binary
 make install   # installs to $GOPATH/bin
@@ -74,7 +74,7 @@ make install   # installs to $GOPATH/bin
 
 ### Pre-built binaries
 
-Check [Releases](https://github.com/RamXX/vlt/releases) for pre-built binaries for macOS, Linux, and Windows.
+Check [Releases](https://github.com/paivot-ai/vlt/releases) for pre-built binaries for macOS, Linux, and Windows.
 
 ## Quick start
 
@@ -642,7 +642,7 @@ cmd/vlt/ (CLI)               Thin CLI wrapper
 Other Go programs can import vlt directly:
 
 ```go
-import "github.com/RamXX/vlt"
+import "github.com/paivot-ai/vlt"
 
 vault, _ := vlt.OpenByName("MyVault")
 result, _ := vault.Read("Session Operating Mode", "")

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"time"
 
-	vlt "github.com/RamXX/vlt"
+	vlt "github.com/paivot-ai/vlt"
 )
 
 func printVaults(vaults map[string]string, format string) {

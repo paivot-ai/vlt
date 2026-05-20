@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	vlt "github.com/RamXX/vlt"
+	vlt "github.com/paivot-ai/vlt"
 )
 
 func TestOutputFormat(t *testing.T) {

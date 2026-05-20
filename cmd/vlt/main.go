@@ -13,7 +13,7 @@ import (
 	"os"
 	"strings"
 
-	vlt "github.com/RamXX/vlt"
+	vlt "github.com/paivot-ai/vlt"
 )
 
 // version is set at build time via ldflags. Falls back to "dev" for
@@ -318,7 +318,7 @@ Wikilink support:
   Block references (^block-id) are fully supported in parsing, rename, and backlinks.
 
 Library usage:
-  import "github.com/RamXX/vlt"
+  import "github.com/paivot-ai/vlt"
 
   vault, _ := vlt.OpenByName("MyVault")
   result, _ := vault.Read("Session Operating Mode", "")
