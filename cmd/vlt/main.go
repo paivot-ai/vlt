@@ -178,7 +178,7 @@ func parseArgs(args []string) (string, map[string]string, map[string]bool) {
 			// but handles edge cases like programmatic invocation).
 			val = strings.Trim(val, "\"'")
 			params[key] = val
-		} else if knownCommands[arg] {
+		} else if knownCommands[arg] && cmd == "" {
 			cmd = arg
 		} else {
 			flags[arg] = true

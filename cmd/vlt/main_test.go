@@ -66,6 +66,13 @@ func TestParseArgs(t *testing.T) {
 			wantParams: map[string]string{"vault": "Claude", "file": "My Note"},
 			wantFlags:  map[string]bool{},
 		},
+		{
+			name:       "patch delete flag does not replace command",
+			args:       []string{"vault=Claude", "patch", "file=Note", "line=2-4", "delete"},
+			wantCmd:    "patch",
+			wantParams: map[string]string{"vault": "Claude", "file": "Note", "line": "2-4"},
+			wantFlags:  map[string]bool{"delete": true},
+		},
 	}
 
 	for _, tt := range tests {
@@ -97,6 +104,50 @@ func TestParseArgs(t *testing.T) {
 				t.Errorf("got %d flags, want %d", len(flags), len(tt.wantFlags))
 			}
 		})
+	}
+}
+
+func TestDispatchPatchLineRangeDeleteKeepsSurroundingContent(t *testing.T) {
+	dir := t.TempDir()
+	notePath := filepath.Join(dir, "Range.md")
+	original := "line 1\nline 2\nline 3\nline 4\nline 5\n"
+	if err := os.WriteFile(notePath, []byte(original), 0644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	v, err := vlt.Open(dir)
+	if err != nil {
+		t.Fatalf("open vault: %v", err)
+	}
+
+	cmd, params, flags := parseArgs([]string{
+		"vault=" + dir,
+		"patch",
+		"file=Range",
+		"line=2-4",
+		"delete",
+	})
+	if cmd != "patch" {
+		t.Fatalf("cmd = %q, want patch; parseArgs must not treat delete as the top-level command", cmd)
+	}
+	if !flags["delete"] {
+		t.Fatal("delete flag missing")
+	}
+
+	if err := dispatchPatch(v, params, flags["delete"], false); err != nil {
+		t.Fatalf("dispatch patch line range delete: %v", err)
+	}
+
+	data, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("read patched note: %v", err)
+	}
+	want := "line 1\nline 5\n"
+	if string(data) != want {
+		t.Fatalf("patched content mismatch:\ngot:  %q\nwant: %q", string(data), want)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".trash", "Range.md")); !os.IsNotExist(err) {
+		t.Fatalf("patch line range delete should not trash the whole file; stat err=%v", err)
 	}
 }
 
