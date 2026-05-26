@@ -733,7 +733,16 @@ When demand warrants it, we plan to integrate [tantivy](https://github.com/quick
 
 This will be an opt-in feature -- the zero-dependency linear scan remains the default for simplicity. If this matters to you, open an issue or upvote an existing one.
 
-### Recently shipped (v0.9.1)
+### Recently shipped (v0.10.1)
+
+- **`patch` delete stays a flag** -- range and heading deletes are invoked via the `delete` flag rather than a positional argument, fixing delete invocations from the CLI.
+- **Docs** -- build-from-source now correctly states the Go 1.26+ requirement.
+
+### Previously shipped (v0.10.0)
+
+- **Module path migration** -- the module is now `github.com/paivot-ai/vlt` (was `github.com/RamXX/vlt`). Install and import with the new path: `go install github.com/paivot-ai/vlt/cmd/vlt@latest`.
+
+### Previously shipped (v0.9.1)
 
 - **Duplicate heading detection** -- `patch` (and heading-scoped `read`) now detects duplicate headings and returns a clear error with match count and 1-based line numbers instead of silently targeting the first match. Error format: `heading "## X" is ambiguous: found N matches at lines 1, 5`.
 
