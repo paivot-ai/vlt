@@ -57,7 +57,7 @@ For straightforward vaults -- plain notes, frontmatter, wikilinks, tags -- this 
 
 ## Installation
 
-### From source (requires Go 1.24+)
+### From source (requires Go 1.26+)
 
 ```bash
 go install github.com/paivot-ai/vlt/cmd/vlt@latest
@@ -706,7 +706,7 @@ All tests use `t.TempDir()` for isolated vault environments. No mocks -- every t
 
 ## Built with `vlt`
 
-`vlt` proved to be so effective and fast, that became the back-end engine for the `nd` issue tracker, found at https://github.com/RamXX/nd. `nd` enforces a strict [Beads](https://github.com/steveyegge/beads)-compatible worflow but using the flexibility and cleanliness of `vlt` in the back-end.
+`vlt` proved to be so effective and fast, that became the back-end engine for the `nd` issue tracker, found at https://github.com/paivot-ai/nd. `nd` enforces a strict [Beads](https://github.com/steveyegge/beads)-compatible worflow but using the flexibility and cleanliness of `vlt` in the back-end.
 
 ## Contributing
 
