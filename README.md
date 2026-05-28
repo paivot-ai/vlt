@@ -59,18 +59,23 @@ For straightforward vaults -- plain notes, frontmatter, wikilinks, tags -- this 
 
 ### From source (requires Go 1.26+)
 
-```bash
-go install github.com/paivot-ai/vlt/cmd/vlt@latest
-```
-
-Or build from a local clone:
+Clone and build -- this is the simplest path and always works:
 
 ```bash
 git clone https://github.com/paivot-ai/vlt.git
 cd vlt
-make build     # produces ./vlt binary
-make install   # installs to $GOPATH/bin
+make install   # builds and installs to $GOPATH/bin
 ```
+
+(`make build` alone produces a local `./vlt` binary without installing.)
+
+Or install directly with `go install`:
+
+```bash
+go install github.com/paivot-ai/vlt/cmd/vlt@latest
+```
+
+> **Note the `/cmd/vlt` suffix.** The binary's `main` package lives under `cmd/vlt`, while the module root is an importable library. The bare module path (`go install github.com/paivot-ai/vlt@latest`) will fail with `package github.com/paivot-ai/vlt is not a main package`. Always include `/cmd/vlt`.
 
 ### Pre-built binaries
 
