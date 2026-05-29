@@ -833,6 +833,51 @@ func (v *Vault) SearchWithContext(opts SearchOptions) ([]ContextMatch, error) {
 	return contextResults, nil
 }
 
+// atomicWriteFile writes data to path atomically: it writes to a temporary
+// file in the same directory, then renames it into place. POSIX rename is
+// atomic on the same filesystem, so a concurrent lock-free reader always
+// observes either the complete old file or the complete new file -- never a
+// truncated or empty intermediate state. This guarantee is what makes
+// lock-free reads safe (readers acquire no flock by default).
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	// Leading dot keeps the temp file out of markdown discovery (it neither
+	// ends in .md nor is visible to dot-skipping walkers) during the window
+	// before the rename completes.
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	// Remove the temp file unless the rename below claims it.
+	defer func() {
+		if tmpName != "" {
+			os.Remove(tmpName)
+		}
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	tmpName = "" // rename succeeded; ownership transferred to path
+	return nil
+}
+
 // Create creates a new note at the given path within the vault.
 // Returns ErrNoteExists if the note already exists.
 // When timestamps is true (or VLT_TIMESTAMPS=1), created_at and updated_at
@@ -865,7 +910,7 @@ func (v *Vault) Create(name, path, content string, silent, timestamps bool) erro
 	}
 
 	contentBytes := []byte(content)
-	if err := os.WriteFile(fullPath, contentBytes, 0644); err != nil {
+	if err := atomicWriteFile(fullPath, contentBytes, 0644); err != nil {
 		return err
 	}
 	v.registry.register(v.dir, fullPath, contentBytes)
@@ -901,7 +946,7 @@ func (v *Vault) Append(title, content string, timestamps bool) error {
 		}
 		updated := ensureTimestamps(string(data), false, time.Now())
 		updatedBytes := []byte(updated)
-		if err := os.WriteFile(path, updatedBytes, 0644); err != nil {
+		if err := atomicWriteFile(path, updatedBytes, 0644); err != nil {
 			return err
 		}
 		v.registry.register(v.dir, path, updatedBytes)
@@ -952,7 +997,7 @@ func (v *Vault) Prepend(title, content string, timestamps bool) error {
 	}
 
 	resultBytes := []byte(result)
-	if err := os.WriteFile(path, resultBytes, 0644); err != nil {
+	if err := atomicWriteFile(path, resultBytes, 0644); err != nil {
 		return err
 	}
 	v.registry.register(v.dir, path, resultBytes)
@@ -993,7 +1038,7 @@ func (v *Vault) Write(title, content string, timestamps bool) error {
 	}
 
 	resultBytes := []byte(result)
-	if err := os.WriteFile(path, resultBytes, 0644); err != nil {
+	if err := atomicWriteFile(path, resultBytes, 0644); err != nil {
 		return err
 	}
 	v.registry.register(v.dir, path, resultBytes)
@@ -1098,7 +1143,7 @@ func (v *Vault) Patch(title string, opts PatchOptions) error {
 	}
 
 	outputBytes := []byte(output)
-	if err := os.WriteFile(path, outputBytes, 0644); err != nil {
+	if err := atomicWriteFile(path, outputBytes, 0644); err != nil {
 		return err
 	}
 	v.registry.register(v.dir, path, outputBytes)
@@ -1169,7 +1214,7 @@ func (v *Vault) patchOldNew(path, text string, lines []string, opts PatchOptions
 	}
 
 	outputBytes := []byte(output)
-	if err := os.WriteFile(path, outputBytes, 0644); err != nil {
+	if err := atomicWriteFile(path, outputBytes, 0644); err != nil {
 		return err
 	}
 	v.registry.register(v.dir, path, outputBytes)
@@ -1362,7 +1407,7 @@ func (v *Vault) PropertySet(title, name, value string) error {
 
 	result := strings.Join(lines, "\n")
 	resultBytes := []byte(result)
-	if err := os.WriteFile(path, resultBytes, 0644); err != nil {
+	if err := atomicWriteFile(path, resultBytes, 0644); err != nil {
 		return err
 	}
 	v.registry.register(v.dir, path, resultBytes)
@@ -1392,7 +1437,7 @@ func (v *Vault) PropertyRemove(title, name string) error {
 	}
 
 	updatedBytes := []byte(updated)
-	if err := os.WriteFile(path, updatedBytes, 0644); err != nil {
+	if err := atomicWriteFile(path, updatedBytes, 0644); err != nil {
 		return err
 	}
 	v.registry.register(v.dir, path, updatedBytes)

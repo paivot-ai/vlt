@@ -152,7 +152,7 @@ func (v *Vault) TemplatesApply(templateName, noteName, notePath string) error {
 	}
 
 	contentBytes := []byte(content)
-	if err := os.WriteFile(fullPath, contentBytes, 0644); err != nil {
+	if err := atomicWriteFile(fullPath, contentBytes, 0644); err != nil {
 		return err
 	}
 	v.registry.register(v.dir, fullPath, contentBytes)

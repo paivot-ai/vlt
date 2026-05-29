@@ -191,7 +191,7 @@ func (v *Vault) Daily(dateStr string) (DailyResult, error) {
 	}
 
 	contentBytes := []byte(content)
-	if err := os.WriteFile(fullPath, contentBytes, 0644); err != nil {
+	if err := atomicWriteFile(fullPath, contentBytes, 0644); err != nil {
 		return DailyResult{}, err
 	}
 	v.registry.register(v.dir, fullPath, contentBytes)

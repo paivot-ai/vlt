@@ -13,7 +13,7 @@ description: >-
   knowledge management.
   Provides comprehensive guidance for using vlt in agentic AI workflows,
   CI/CD pipelines, and shell scripting.
-version: 0.10.1
+version: 0.10.2
 ---
 
 # vlt -- Obsidian Vault CLI for Coding Agents

@@ -738,7 +738,11 @@ When demand warrants it, we plan to integrate [tantivy](https://github.com/quick
 
 This will be an opt-in feature -- the zero-dependency linear scan remains the default for simplicity. If this matters to you, open an issue or upvote an existing one.
 
-### Recently shipped (v0.10.1)
+### Recently shipped (v0.10.2)
+
+- **Atomic writes** -- every note rewrite now goes through a temp-file-plus-rename, so a lock-free reader always sees the complete old or complete new file, never a truncated intermediate state. Fixes a torn-read race surfaced by concurrent read-during-write.
+
+### Previously shipped (v0.10.1)
 
 - **`patch` delete stays a flag** -- range and heading deletes are invoked via the `delete` flag rather than a positional argument, fixing delete invocations from the CLI.
 - **Docs** -- build-from-source now correctly states the Go 1.26+ requirement.

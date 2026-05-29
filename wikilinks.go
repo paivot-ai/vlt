@@ -92,7 +92,7 @@ func updateVaultLinks(vaultDir, oldTitle, newTitle string, reg *Registry) (int, 
 		updated := ReplaceWikilinks(text, oldTitle, newTitle)
 		if updated != text {
 			updatedBytes := []byte(updated)
-			if err := os.WriteFile(path, updatedBytes, 0644); err != nil {
+			if err := atomicWriteFile(path, updatedBytes, 0644); err != nil {
 				return fmt.Errorf("failed to update %s: %w", path, err)
 			}
 			if reg != nil {
@@ -180,7 +180,7 @@ func updateVaultMdLinks(vaultDir, oldRelPath, newRelPath string, reg *Registry) 
 
 		if updated != text {
 			updatedBytes := []byte(updated)
-			if err := os.WriteFile(path, updatedBytes, 0644); err != nil {
+			if err := atomicWriteFile(path, updatedBytes, 0644); err != nil {
 				return fmt.Errorf("failed to update %s: %w", path, err)
 			}
 			if reg != nil {
