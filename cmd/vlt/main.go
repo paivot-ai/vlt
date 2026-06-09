@@ -33,13 +33,27 @@ var knownCommands = map[string]bool{
 	"vaults": true, "help": true, "version": true,
 }
 
+// knownFlags lists every bare-word flag the CLI accepts. Anything else is an
+// error: a silently ignored typo ("permanant", "delette") would otherwise
+// change behaviour without any signal to the caller.
+var knownFlags = map[string]bool{
+	"silent": true, "permanent": true, "delete": true, "timestamps": true,
+	"counts": true, "total": true, "done": true, "pending": true,
+	"follow": true, "backlinks": true, "force": true,
+	"--strict-flock": true, "--json": true, "--yaml": true, "--csv": true,
+	"--tsv": true, "--tree": true, "--help": true, "-h": true, "--version": true,
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(1)
 	}
 
-	cmd, params, flags := parseArgs(os.Args[1:])
+	cmd, params, flags, err := parseArgs(os.Args[1:])
+	if err != nil {
+		die("%v", err)
+	}
 
 	if cmd == "help" || flags["--help"] || flags["-h"] {
 		usage()
@@ -87,6 +101,10 @@ func main() {
 		if lockErr != nil {
 			die("cannot lock vault: %v", lockErr)
 		}
+		// The integrity registry was loaded before the lock was held; a
+		// concurrent writer may have flushed entries in between. Reload so
+		// this process's flushes do not erase them.
+		v.ReloadRegistry()
 	}
 	defer unlock()
 
@@ -109,7 +127,7 @@ func main() {
 	case "patch":
 		err = dispatchPatch(v, params, flags["delete"], ts)
 	case "move":
-		err = dispatchMove(v, params)
+		err = dispatchMove(v, params, flags["force"])
 	case "delete":
 		err = dispatchDelete(v, params, flags["permanent"])
 	case "property:set":
@@ -165,7 +183,8 @@ func main() {
 
 // parseArgs splits CLI arguments into a command name, key=value parameters,
 // and bare-word flags. It preserves the obsidian CLI's key="value" syntax.
-func parseArgs(args []string) (string, map[string]string, map[string]bool) {
+// Unknown bare words are an error rather than silently ignored.
+func parseArgs(args []string) (string, map[string]string, map[string]bool, error) {
 	params := make(map[string]string)
 	flags := make(map[string]bool)
 	var cmd string
@@ -174,18 +193,73 @@ func parseArgs(args []string) (string, map[string]string, map[string]bool) {
 		if i := strings.Index(arg, "="); i > 0 {
 			key := arg[:i]
 			val := arg[i+1:]
-			// Strip surrounding quotes (shouldn't be needed after shell parsing,
-			// but handles edge cases like programmatic invocation).
-			val = strings.Trim(val, "\"'")
-			params[key] = val
+			params[key] = stripQuotePair(val)
 		} else if knownCommands[arg] && cmd == "" {
 			cmd = arg
-		} else {
+		} else if knownFlags[arg] {
 			flags[arg] = true
+		} else {
+			return "", nil, nil, fmt.Errorf("unknown command or flag: %q%s", arg, suggestArg(arg))
 		}
 	}
 
-	return cmd, params, flags
+	return cmd, params, flags, nil
+}
+
+// stripQuotePair removes exactly one matching pair of surrounding quotes.
+// This handles programmatic invocation where shell quote removal did not
+// happen, without mangling values that legitimately contain quotes.
+func stripQuotePair(s string) string {
+	if len(s) >= 2 && (s[0] == '"' || s[0] == '\'') && s[len(s)-1] == s[0] {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+// suggestArg returns a " (did you mean ...?)" hint when arg is within edit
+// distance 2 of a known command or flag.
+func suggestArg(arg string) string {
+	best := ""
+	bestDist := 3 // only suggest within distance 2
+	for _, set := range []map[string]bool{knownCommands, knownFlags} {
+		for known := range set {
+			if d := editDistance(arg, known); d < bestDist {
+				bestDist = d
+				best = known
+			}
+		}
+	}
+	if best == "" {
+		return ""
+	}
+	return fmt.Sprintf(" (did you mean %q?)", best)
+}
+
+// editDistance computes the Levenshtein distance between two strings.
+func editDistance(a, b string) int {
+	if len(a) == 0 {
+		return len(b)
+	}
+	if len(b) == 0 {
+		return len(a)
+	}
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, min(cur[j-1]+1, prev[j-1]+cost))
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
 }
 
 func die(format string, args ...any) {
@@ -232,8 +306,8 @@ File commands:
   patch          file="<title>" line="<N>" [content="<text>"] [delete] [timestamps]           Line edit
   patch          file="<title>" line="<N-M>" [content="<text>"] [delete] [timestamps]         Line range edit
   patch          file="<title>" old="<text>" new="<text>" [heading=|line=] [timestamps]       Find and replace
-  move           path="<from>" to="<to>"                     Move/rename (updates wiki + md links)
-  delete         file="<title>" [permanent]                  Trash (or permanently delete)
+  move           path="<from>" to="<to>" [force]             Move/rename (updates wiki + md links; refuses to overwrite without force)
+  delete         file="<title>" [permanent]                  Trash (or permanently delete; trash names never collide)
   files          [folder="<dir>"] [ext="<ext>"] [total]      List vault files
   daily          [date="YYYY-MM-DD"]                         Create or read daily note
 
@@ -283,8 +357,9 @@ Other:
 
 Options:
   vault="<name>"   Vault name (from Obsidian config), absolute path, or VLT_VAULT env var.
-  silent           Suppress output on create.
+  silent           Suppress success output on create ("already exists" still goes to stderr).
   permanent        Hard delete instead of .trash.
+  force            Allow move to overwrite an existing destination.
   delete           Remove heading+content or line(s) instead of replacing (patch).
   old/new          Find-and-replace within scope (heading, line, or file-wide if neither).
   heading          Accepts "## Section" (exact level) or "Section" (any level).
@@ -296,6 +371,7 @@ Options:
   follow           Include full content of forward-linked notes (read only).
   backlinks        Include full content of notes linking to this one (read only).
   --strict-flock   Acquire advisory flock for reads too (default: writes only).
+                   Lock waits time out after 10s; tune with VLT_LOCK_TIMEOUT ("30s", "0" = wait forever).
   --json           Output in JSON format.
   --yaml           Output in YAML format.
   --csv            Output in CSV format.

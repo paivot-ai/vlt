@@ -8,14 +8,15 @@ import (
 	"syscall"
 )
 
-// lockVault acquires an advisory lock on the vault directory.
-// If exclusive is true an exclusive (write) lock is taken; otherwise a shared
-// (read) lock is taken. The returned function releases the lock.
-func LockVault(vaultDir string, exclusive bool) (func(), error) {
+// tryLockVault attempts a non-blocking advisory lock on the vault directory.
+// Returns (release, busy, err): busy is true when another process holds a
+// conflicting lock; err reports any other failure. The retry/timeout policy
+// lives in LockVault (lock.go).
+func tryLockVault(vaultDir string, exclusive bool) (func(), bool, error) {
 	p := filepath.Join(vaultDir, LockFileName)
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	fd := int(f.Fd()) // #nosec G115 -- file descriptors fit in int
@@ -23,13 +24,16 @@ func LockVault(vaultDir string, exclusive bool) (func(), error) {
 	if exclusive {
 		how = syscall.LOCK_EX
 	}
-	if err := syscall.Flock(fd, how); err != nil {
+	if err := syscall.Flock(fd, how|syscall.LOCK_NB); err != nil {
 		f.Close()
-		return nil, err
+		if err == syscall.EWOULDBLOCK || err == syscall.EAGAIN {
+			return nil, true, nil
+		}
+		return nil, false, err
 	}
 
 	return func() {
 		syscall.Flock(fd, syscall.LOCK_UN)
 		f.Close()
-	}, nil
+	}, false, nil
 }

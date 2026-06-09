@@ -24,7 +24,19 @@ func ExtractFrontmatter(text string) (yaml string, bodyStart int, found bool) {
 	return "", 0, false
 }
 
+// isTopLevelKeyLine reports whether line declares key at the top level of a
+// frontmatter mapping: the line must be unindented and start with "key:".
+// Indented lines are nested under another mapping and never match, so a
+// filter or property operation on "type" does not touch "metadata: type:".
+func isTopLevelKeyLine(line, key string) bool {
+	if line == "" || line[0] == ' ' || line[0] == '\t' {
+		return false
+	}
+	return strings.HasPrefix(line, key+":")
+}
+
 // FrontmatterGetList extracts a list value from frontmatter YAML.
+// Only top-level (unindented) keys are matched.
 // Handles inline format: key: [a, b, c]
 // and block format:
 //
@@ -36,12 +48,11 @@ func FrontmatterGetList(yaml, key string) []string {
 	prefix := key + ":"
 
 	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, prefix) {
+		if !isTopLevelKeyLine(line, key) {
 			continue
 		}
 
-		value := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), prefix))
 
 		// Inline list: [a, b, c]
 		if strings.HasPrefix(value, "[") && strings.HasSuffix(value, "]") {
@@ -86,14 +97,14 @@ func FrontmatterGetList(yaml, key string) []string {
 }
 
 // FrontmatterGetValue extracts a simple string value from frontmatter YAML.
+// Only top-level (unindented) keys are matched.
 func FrontmatterGetValue(yaml, key string) (string, bool) {
 	lines := strings.Split(yaml, "\n")
 	prefix := key + ":"
 
 	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, prefix) {
-			value := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		if isTopLevelKeyLine(line, key) {
+			value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), prefix))
 			value = strings.Trim(value, "\"'")
 			return value, true
 		}
@@ -130,13 +141,12 @@ func frontmatterRemoveKey(text, key string) string {
 	removeEnd := -1
 
 	for i := fmStart + 1; i < fmEnd; i++ {
-		trimmed := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(trimmed, prefix) {
+		if isTopLevelKeyLine(lines[i], key) {
 			keyLine = i
 			removeEnd = i + 1
 
 			// Check if followed by a block list
-			value := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+			value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(lines[i]), prefix))
 			if value == "" {
 				for j := i + 1; j < fmEnd; j++ {
 					t := strings.TrimSpace(lines[j])
@@ -226,11 +236,9 @@ func ensureTimestamps(text string, isCreate bool, now time.Time) string {
 
 	// Set or update properties within frontmatter
 	setProperty := func(key, value string, overwrite bool) {
-		prefix := key + ":"
 		found := false
 		for i := fmStart + 1; i < fmEnd; i++ {
-			trimmed := strings.TrimSpace(lines[i])
-			if strings.HasPrefix(trimmed, prefix) {
+			if isTopLevelKeyLine(lines[i], key) {
 				if overwrite {
 					lines[i] = fmt.Sprintf("%s: %s", key, value)
 				}

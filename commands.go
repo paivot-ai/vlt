@@ -74,6 +74,10 @@ type MoveResult struct {
 // ErrNoteExists is returned by Create when a note already exists at the target path.
 var ErrNoteExists = fmt.Errorf("note already exists")
 
+// ErrDestinationExists is returned by Move when the destination already exists
+// and force was not requested.
+var ErrDestinationExists = fmt.Errorf("destination already exists")
+
 // sectionBounds holds the line range of a section identified by findSection.
 // HeadingLine is the 0-based index of the heading line itself.
 // ContentStart is the 0-based index of the first content line after the heading.
@@ -353,7 +357,7 @@ func (v *Vault) Read(title, heading string) (ReadResult, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return ReadResult{}, err
 	}
@@ -403,7 +407,7 @@ func (v *Vault) ReadFollow(title, heading string) (ReadResult, []LinkedNote, err
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return ReadResult{}, nil, err
 	}
@@ -439,7 +443,7 @@ func (v *Vault) ReadFollow(title, heading string) (ReadResult, []LinkedNote, err
 		}
 		seen[wl.Title] = true
 
-		linkedPath, resolveErr := resolveNote(v.dir, wl.Title)
+		linkedPath, resolveErr := v.resolve(wl.Title)
 		if resolveErr != nil {
 			continue // skip broken links
 		}
@@ -464,7 +468,7 @@ func (v *Vault) ReadWithBacklinks(title, heading string) (ReadResult, []LinkedNo
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return ReadResult{}, nil, err
 	}
@@ -490,7 +494,7 @@ func (v *Vault) ReadWithBacklinks(title, heading string) (ReadResult, []LinkedNo
 		}
 	}
 
-	blPaths, err := FindBacklinks(v.dir, title)
+	blPaths, err := findBacklinksAny(v.dir, v.backlinkTargets(title))
 	if err != nil {
 		return ReadResult{Content: primary, Integrity: status}, nil, err
 	}
@@ -914,51 +918,45 @@ func (v *Vault) Create(name, path, content string, silent, timestamps bool) erro
 		return err
 	}
 	v.registry.register(v.dir, fullPath, contentBytes)
+	v.invalidateIndex()
 	return nil
 }
 
-// Append adds content to the end of an existing note.
+// Append adds content to the end of an existing note. The write is atomic
+// (read, concatenate, rename into place) so lock-free readers never observe
+// a partially appended file. If the existing content does not end with a
+// newline, one is inserted so appended content starts on its own line.
 // When timestamps is true (or VLT_TIMESTAMPS=1), updated_at is refreshed.
 func (v *Vault) Append(title, content string, timestamps bool) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return err
 	}
 
-	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 
-	if _, err = fmt.Fprint(f, content); err != nil {
-		f.Close()
-		return err
+	text := string(data)
+	if text != "" && !strings.HasSuffix(text, "\n") && content != "" && !strings.HasPrefix(content, "\n") {
+		text += "\n"
 	}
-	f.Close()
+	result := text + content
 
 	if timestampsEnabled(timestamps) {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		updated := ensureTimestamps(string(data), false, time.Now())
-		updatedBytes := []byte(updated)
-		if err := atomicWriteFile(path, updatedBytes, 0644); err != nil {
-			return err
-		}
-		v.registry.register(v.dir, path, updatedBytes)
-		return nil
+		result = ensureTimestamps(result, false, time.Now())
 	}
 
-	// No timestamps -- read final content for registration.
-	final, err := os.ReadFile(path)
-	if err != nil {
-		return nil // write succeeded, registration is best-effort
+	resultBytes := []byte(result)
+	if err := atomicWriteFile(path, resultBytes, 0644); err != nil {
+		return err
 	}
-	v.registry.register(v.dir, path, final)
+	v.registry.register(v.dir, path, resultBytes)
+	v.invalidateIndex()
 	return nil
 }
 
@@ -968,7 +966,7 @@ func (v *Vault) Prepend(title, content string, timestamps bool) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return err
 	}
@@ -980,6 +978,12 @@ func (v *Vault) Prepend(title, content string, timestamps bool) error {
 
 	text := string(data)
 	_, bodyStart, hasFM := ExtractFrontmatter(text)
+
+	// Ensure prepended content ends with a newline so it does not merge
+	// with the first body line.
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
 
 	lines := strings.Split(text, "\n")
 	var result string
@@ -1001,6 +1005,7 @@ func (v *Vault) Prepend(title, content string, timestamps bool) error {
 		return err
 	}
 	v.registry.register(v.dir, path, resultBytes)
+	v.invalidateIndex()
 	return nil
 }
 
@@ -1011,7 +1016,7 @@ func (v *Vault) Write(title, content string, timestamps bool) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return err
 	}
@@ -1031,6 +1036,11 @@ func (v *Vault) Write(title, content string, timestamps bool) error {
 		result = frontmatter + "\n" + content
 	} else {
 		result = content
+	}
+
+	// Files conventionally end with a newline; preserve that invariant.
+	if result != "" && !strings.HasSuffix(result, "\n") {
+		result += "\n"
 	}
 
 	if timestampsEnabled(timestamps) {
@@ -1055,7 +1065,7 @@ func (v *Vault) Patch(title string, opts PatchOptions) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return err
 	}
@@ -1147,6 +1157,7 @@ func (v *Vault) Patch(title string, opts PatchOptions) error {
 		return err
 	}
 	v.registry.register(v.dir, path, outputBytes)
+	v.invalidateIndex()
 	return nil
 }
 
@@ -1218,14 +1229,25 @@ func (v *Vault) patchOldNew(path, text string, lines []string, opts PatchOptions
 		return err
 	}
 	v.registry.register(v.dir, path, outputBytes)
+	v.invalidateIndex()
 	return nil
 }
 
 // Move moves a note from one path to another within the vault.
-// If the filename changes (rename, not just folder move), all wikilinks
-// referencing the old title are updated vault-wide.
+// Returns ErrDestinationExists if a file already exists at the destination;
+// use MoveForce to overwrite. Wikilinks referencing the old title and
+// path-form wikilinks ([[folder/Note]]) are updated vault-wide.
 // Returns a MoveResult describing what was updated.
 func (v *Vault) Move(from, to string) (MoveResult, error) {
+	return v.move(from, to, false)
+}
+
+// MoveForce is Move but overwrites the destination if it already exists.
+func (v *Vault) MoveForce(from, to string) (MoveResult, error) {
+	return v.move(from, to, true)
+}
+
+func (v *Vault) move(from, to string, force bool) (MoveResult, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -1242,6 +1264,13 @@ func (v *Vault) Move(from, to string) (MoveResult, error) {
 		return MoveResult{}, fmt.Errorf("source not found: %s", from)
 	}
 
+	// Never silently overwrite an existing destination.
+	if fromPath != toPath {
+		if _, err := os.Stat(toPath); err == nil && !force {
+			return MoveResult{}, fmt.Errorf("move destination %s: %w (use force to overwrite)", to, ErrDestinationExists)
+		}
+	}
+
 	if err := os.MkdirAll(filepath.Dir(toPath), 0755); err != nil {
 		return MoveResult{}, err
 	}
@@ -1252,6 +1281,7 @@ func (v *Vault) Move(from, to string) (MoveResult, error) {
 	if err := os.Rename(fromPath, toPath); err != nil {
 		return MoveResult{}, err
 	}
+	v.invalidateIndex()
 
 	// Deregister old path, register new path.
 	v.registry.deregister(v.dir, fromPath)
@@ -1264,13 +1294,25 @@ func (v *Vault) Move(from, to string) (MoveResult, error) {
 		NewTitle: newTitle,
 	}
 
-	// If the filename changed, update wikilinks across the vault.
+	// If the filename changed, update title-form wikilinks across the vault.
 	if oldTitle != newTitle {
 		count, err := updateVaultLinks(v.dir, oldTitle, newTitle, v.registry)
 		if err != nil {
 			return res, fmt.Errorf("moved file but failed updating links: %w", err)
 		}
 		res.WikilinksUpdated = count
+	}
+
+	// Update path-form wikilinks ([[folder/Note]]) -- these break on any
+	// move, including folder-only moves where the title is unchanged.
+	oldRelNoExt := strings.TrimSuffix(filepath.ToSlash(filepath.Clean(from)), ".md")
+	newRelNoExt := strings.TrimSuffix(filepath.ToSlash(filepath.Clean(to)), ".md")
+	if oldRelNoExt != oldTitle && oldRelNoExt != newRelNoExt {
+		count, err := updateVaultLinks(v.dir, oldRelNoExt, newRelNoExt, v.registry)
+		if err != nil {
+			return res, fmt.Errorf("moved file but failed updating path links: %w", err)
+		}
+		res.WikilinksUpdated += count
 	}
 
 	// Update markdown-style [text](path.md) links across the vault.
@@ -1280,6 +1322,7 @@ func (v *Vault) Move(from, to string) (MoveResult, error) {
 	}
 	res.MdLinksUpdated = mdCount
 
+	v.invalidateIndex()
 	return res, nil
 }
 
@@ -1298,7 +1341,7 @@ func (v *Vault) Delete(title, notePath string, permanent bool) (string, error) {
 			return "", fmt.Errorf("delete: %w", pathErr)
 		}
 	} else if title != "" {
-		resolved, err := resolveNote(v.dir, title)
+		resolved, err := v.resolve(title)
 		if err != nil {
 			return "", err
 		}
@@ -1318,6 +1361,7 @@ func (v *Vault) Delete(title, notePath string, permanent bool) (string, error) {
 			return "", err
 		}
 		v.registry.deregister(v.dir, fullPath)
+		v.invalidateIndex()
 		return fmt.Sprintf("deleted: %s", relPath), nil
 	}
 
@@ -1325,12 +1369,36 @@ func (v *Vault) Delete(title, notePath string, permanent bool) (string, error) {
 	if err := os.MkdirAll(trashDir, 0755); err != nil {
 		return "", err
 	}
-	trashPath := filepath.Join(trashDir, filepath.Base(fullPath))
+	trashName, err := uniqueTrashName(trashDir, filepath.Base(fullPath))
+	if err != nil {
+		return "", err
+	}
+	trashPath := filepath.Join(trashDir, trashName)
 	if err := os.Rename(fullPath, trashPath); err != nil {
 		return "", err
 	}
 	v.registry.deregister(v.dir, fullPath)
-	return fmt.Sprintf("trashed: %s -> .trash/%s", relPath, filepath.Base(fullPath)), nil
+	v.invalidateIndex()
+	return fmt.Sprintf("trashed: %s -> .trash/%s", relPath, trashName), nil
+}
+
+// uniqueTrashName returns a filename that does not collide with anything
+// already in the trash directory. On collision a numeric suffix is appended
+// ("Note.md" -> "Note 1.md"), matching Obsidian's behaviour, so trashing a
+// note never destroys a previously trashed one.
+func uniqueTrashName(trashDir, base string) (string, error) {
+	candidate := base
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for i := 1; ; i++ {
+		if _, err := os.Stat(filepath.Join(trashDir, candidate)); os.IsNotExist(err) {
+			return candidate, nil
+		}
+		if i > 10000 {
+			return "", fmt.Errorf("cannot find free name in .trash for %s", base)
+		}
+		candidate = fmt.Sprintf("%s %d%s", stem, i, ext)
+	}
 }
 
 // Properties returns the YAML frontmatter block of a note (with --- delimiters).
@@ -1338,7 +1406,7 @@ func (v *Vault) Properties(title string) (string, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return "", err
 	}
@@ -1352,12 +1420,48 @@ func (v *Vault) Properties(title string) (string, error) {
 	return fm, nil
 }
 
+// validatePropertyName rejects property names that would corrupt the
+// frontmatter block or be unparseable later.
+func validatePropertyName(name string) error {
+	if name == "" {
+		return fmt.Errorf("property name is empty")
+	}
+	if strings.ContainsAny(name, "\n\r") {
+		return fmt.Errorf("property name must not contain newlines")
+	}
+	if strings.Contains(name, ":") {
+		return fmt.Errorf("property name must not contain %q", ":")
+	}
+	if strings.HasPrefix(name, "-") || strings.HasPrefix(name, " ") || strings.HasPrefix(name, "\t") {
+		return fmt.Errorf("property name must not start with %q", string(name[0]))
+	}
+	return nil
+}
+
+// validatePropertyValue rejects values that would break out of the property
+// line and corrupt the frontmatter block.
+func validatePropertyValue(value string) error {
+	if strings.ContainsAny(value, "\n\r") {
+		return fmt.Errorf("property value must not contain newlines")
+	}
+	return nil
+}
+
 // PropertySet sets or adds a YAML frontmatter property in a note.
+// Only top-level (unindented) keys are matched; nested keys under another
+// mapping are never modified.
 func (v *Vault) PropertySet(title, name, value string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	path, err := resolveNote(v.dir, title)
+	if err := validatePropertyName(name); err != nil {
+		return err
+	}
+	if err := validatePropertyValue(value); err != nil {
+		return err
+	}
+
+	path, err := v.resolve(title)
 	if err != nil {
 		return err
 	}
@@ -1386,12 +1490,10 @@ func (v *Vault) PropertySet(title, name, value string) error {
 		return fmt.Errorf("no frontmatter found in %q", title)
 	}
 
-	// Look for existing property line.
+	// Look for an existing top-level property line.
 	found := false
-	prefix := name + ":"
 	for i := fmStart + 1; i < fmEnd; i++ {
-		trimmed := strings.TrimSpace(lines[i])
-		if strings.HasPrefix(trimmed, prefix) {
+		if isTopLevelKeyLine(lines[i], name) {
 			lines[i] = fmt.Sprintf("%s: %s", name, value)
 			found = true
 			break
@@ -1411,6 +1513,7 @@ func (v *Vault) PropertySet(title, name, value string) error {
 		return err
 	}
 	v.registry.register(v.dir, path, resultBytes)
+	v.invalidateIndex()
 	return nil
 }
 
@@ -1419,7 +1522,7 @@ func (v *Vault) PropertyRemove(title, name string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return err
 	}
@@ -1441,15 +1544,33 @@ func (v *Vault) PropertyRemove(title, name string) error {
 		return err
 	}
 	v.registry.register(v.dir, path, updatedBytes)
+	v.invalidateIndex()
 	return nil
 }
 
-// Backlinks finds all notes that contain wikilinks to the given title.
+// Backlinks finds all notes that contain wikilinks to the given title,
+// including path-form links ([[folder/Note]]) when the note resolves.
 func (v *Vault) Backlinks(title string) ([]string, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	return FindBacklinks(v.dir, title)
+	return findBacklinksAny(v.dir, v.backlinkTargets(title))
+}
+
+// backlinkTargets returns the link spellings that reach the given title:
+// the title itself plus, when the note resolves, its vault-relative path
+// without extension.
+func (v *Vault) backlinkTargets(title string) []string {
+	targets := []string{title}
+	if path, err := v.resolve(title); err == nil {
+		if rel, relErr := filepath.Rel(v.dir, path); relErr == nil {
+			relNoExt := strings.TrimSuffix(filepath.ToSlash(rel), ".md")
+			if relNoExt != title {
+				targets = append(targets, relNoExt)
+			}
+		}
+	}
+	return targets
 }
 
 // Links lists outgoing wikilinks from a note, reporting which resolve
@@ -1458,7 +1579,7 @@ func (v *Vault) Links(title string) ([]LinkInfo, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return nil, err
 	}
@@ -1481,12 +1602,10 @@ func (v *Vault) Links(title string) ([]LinkInfo, error) {
 		}
 		seen[link.Title] = true
 
-		resolved, resolveErr := resolveNote(v.dir, link.Title)
-		if resolveErr != nil {
-			results = append(results, LinkInfo{Target: link.Title, Path: "", Broken: true})
+		if rel, ok := v.resolveLink(link.Title); ok {
+			results = append(results, LinkInfo{Target: link.Title, Path: rel, Broken: false})
 		} else {
-			relPath, _ := filepath.Rel(v.dir, resolved)
-			results = append(results, LinkInfo{Target: link.Title, Path: relPath, Broken: false})
+			results = append(results, LinkInfo{Target: link.Title, Path: "", Broken: true})
 		}
 	}
 
@@ -1494,77 +1613,50 @@ func (v *Vault) Links(title string) ([]LinkInfo, error) {
 }
 
 // Orphans finds notes that have no incoming wikilinks or embeds.
+// Both title-form ([[Note]]) and path-form ([[folder/Note]]) references
+// count, as do references to a note's frontmatter aliases.
 func (v *Vault) Orphans() ([]string, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	// Collect all note titles.
+	idx := v.index()
+
+	// Collect referenced targets and per-note aliases in one pass.
 	type noteInfo struct {
 		relPath string
 		title   string
 		aliases []string
 	}
-	var notes []noteInfo
+	notes := make([]noteInfo, 0, len(idx.mdRel))
+	referenced := make(map[string]bool)
 
-	filepath.WalkDir(v.dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if skipHiddenDir(path, d, v.dir) {
-			return filepath.SkipDir
-		}
-		name := d.Name()
-		if d.IsDir() || !strings.HasSuffix(name, ".md") {
-			return nil
-		}
+	for _, rel := range idx.mdRel {
+		title := strings.TrimSuffix(filepath.Base(rel), ".md")
+		info := noteInfo{relPath: filepath.FromSlash(rel), title: title}
 
-		title := strings.TrimSuffix(name, ".md")
-		relPath, _ := filepath.Rel(v.dir, path)
-
-		info := noteInfo{relPath: relPath, title: title}
-
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(filepath.Join(v.dir, filepath.FromSlash(rel)))
 		if err == nil {
-			yaml, _, hasFM := ExtractFrontmatter(string(data))
+			text := string(data)
+			yaml, _, hasFM := ExtractFrontmatter(text)
 			if hasFM {
 				info.aliases = FrontmatterGetList(yaml, "aliases")
+			}
+			for _, link := range ParseWikilinks(text) {
+				referenced[strings.ToLower(filepath.ToSlash(link.Title))] = true
 			}
 		}
 
 		notes = append(notes, info)
-		return nil
-	})
+	}
 
-	// Collect all referenced titles (from wikilinks and embeds).
-	referenced := make(map[string]bool)
-
-	filepath.WalkDir(v.dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if skipHiddenDir(path, d, v.dir) {
-			return filepath.SkipDir
-		}
-		name := d.Name()
-		if d.IsDir() || !strings.HasSuffix(name, ".md") {
-			return nil
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		for _, link := range ParseWikilinks(string(data)) {
-			referenced[strings.ToLower(link.Title)] = true
-		}
-		return nil
-	})
-
-	// Find orphans: notes whose title AND aliases are all unreferenced.
+	// Find orphans: notes whose title, path, and aliases are all unreferenced.
 	var orphans []string
 	for _, note := range notes {
 		if referenced[strings.ToLower(note.title)] {
+			continue
+		}
+		relNoExt := strings.ToLower(strings.TrimSuffix(filepath.ToSlash(note.relPath), ".md"))
+		if referenced[relNoExt] {
 			continue
 		}
 		aliasReferenced := false
@@ -1583,78 +1675,35 @@ func (v *Vault) Orphans() ([]string, error) {
 	return orphans, nil
 }
 
-// Unresolved finds all broken wikilinks across the vault.
+// Unresolved finds all broken wikilinks across the vault. A link resolves if
+// it matches a note title, a vault-relative path (with or without extension),
+// an attachment filename (e.g. [[photo.png]]), or a frontmatter alias.
 func (v *Vault) Unresolved() ([]UnresolvedLink, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	// Build sets of resolvable titles and aliases.
-	titles := make(map[string]bool)
-	aliases := make(map[string]bool)
+	idx := v.index()
 
-	filepath.WalkDir(v.dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if skipHiddenDir(path, d, v.dir) {
-			return filepath.SkipDir
-		}
-		name := d.Name()
-		if d.IsDir() || !strings.HasSuffix(name, ".md") {
-			return nil
-		}
-
-		title := strings.TrimSuffix(name, ".md")
-		titles[strings.ToLower(title)] = true
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-		yaml, _, hasFM := ExtractFrontmatter(string(data))
-		if hasFM {
-			for _, alias := range FrontmatterGetList(yaml, "aliases") {
-				aliases[strings.ToLower(alias)] = true
-			}
-		}
-		return nil
-	})
-
-	// Find links that don't resolve.
 	var results []UnresolvedLink
 	seenTargets := make(map[string]bool)
 
-	filepath.WalkDir(v.dir, func(path string, d os.DirEntry, err error) error {
+	for _, rel := range idx.mdRel {
+		data, err := os.ReadFile(filepath.Join(v.dir, filepath.FromSlash(rel)))
 		if err != nil {
-			return nil
+			continue
 		}
-		if skipHiddenDir(path, d, v.dir) {
-			return filepath.SkipDir
-		}
-		name := d.Name()
-		if d.IsDir() || !strings.HasSuffix(name, ".md") {
-			return nil
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		relPath, _ := filepath.Rel(v.dir, path)
 
 		for _, link := range ParseWikilinks(string(data)) {
-			lower := strings.ToLower(link.Title)
+			lower := strings.ToLower(filepath.ToSlash(link.Title))
 			if seenTargets[lower] {
 				continue
 			}
-			if !titles[lower] && !aliases[lower] {
+			if _, ok := v.resolveLink(link.Title); !ok {
 				seenTargets[lower] = true
-				results = append(results, UnresolvedLink{Target: link.Title, Source: relPath})
+				results = append(results, UnresolvedLink{Target: link.Title, Source: filepath.FromSlash(rel)})
 			}
 		}
-		return nil
-	})
+	}
 
 	return results, nil
 }
@@ -1711,7 +1760,7 @@ func (v *Vault) URI(vaultName, title, heading, block string) (string, error) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return "", err
 	}

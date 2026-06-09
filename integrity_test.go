@@ -547,3 +547,65 @@ func TestRegistryDirPermissions(t *testing.T) {
 		t.Errorf("registry dir permissions: got %o, want 0700", perm)
 	}
 }
+
+// -----------------------------------------------------------------
+// Regression tests from the 2026-06-09 full review.
+// -----------------------------------------------------------------
+
+// TestReloadRegistryPreservesConcurrentWrites simulates the lost-update race:
+// two processes open the vault (loading the registry) before either takes the
+// lock. Without a post-lock reload, the second writer's flush would erase the
+// first writer's entry.
+func TestReloadRegistryPreservesConcurrentWrites(t *testing.T) {
+	vaultDir := t.TempDir()
+
+	v1, err := Open(vaultDir)
+	if err != nil {
+		t.Fatalf("open v1: %v", err)
+	}
+	v2, err := Open(vaultDir) // loads registry before v1 writes
+	if err != nil {
+		t.Fatalf("open v2: %v", err)
+	}
+
+	if err := v1.Create("A", "A.md", "# A\n", false, false); err != nil {
+		t.Fatalf("v1 create: %v", err)
+	}
+
+	// v2 reloads (as the CLI now does after acquiring the lock), then writes.
+	v2.ReloadRegistry()
+	if err := v2.Create("B", "B.md", "# B\n", false, false); err != nil {
+		t.Fatalf("v2 create: %v", err)
+	}
+
+	reg := openRegistry(vaultDir)
+	if _, ok := reg.entries["A.md"]; !ok {
+		t.Error("registry entry for A.md lost -- concurrent write erased it")
+	}
+	if _, ok := reg.entries["B.md"]; !ok {
+		t.Error("registry entry for B.md missing")
+	}
+}
+
+// TestIntegrityBaselineRegistersAllWithSingleRegistry verifies baseline still
+// registers every note after the batched single-flush rewrite.
+func TestIntegrityBaselineRegistersAll(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.MkdirAll(filepath.Join(vaultDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "A.md"), []byte("# A\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "sub", "B.md"), []byte("# B\n"), 0644)
+
+	if err := v.IntegrityBaseline(); err != nil {
+		t.Fatalf("baseline: %v", err)
+	}
+
+	statuses := v.IntegrityStatusAll()
+	if statuses["A.md"] != IntegrityOK {
+		t.Errorf("A.md status = %v, want OK", statuses["A.md"])
+	}
+	if statuses[filepath.Join("sub", "B.md")] != IntegrityOK {
+		t.Errorf("sub/B.md status = %v, want OK", statuses[filepath.Join("sub", "B.md")])
+	}
+}

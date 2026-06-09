@@ -51,8 +51,9 @@ func loadBookmarks(vaultDir string) (bookmarksFile, error) {
 	return bm, nil
 }
 
-// saveBookmarks writes the bookmarksFile to .obsidian/bookmarks.json.
-// Creates the .obsidian directory if it does not exist.
+// saveBookmarks writes the bookmarksFile to .obsidian/bookmarks.json
+// atomically, so a concurrent reader (or Obsidian itself) never observes a
+// torn file. Creates the .obsidian directory if it does not exist.
 func saveBookmarks(vaultDir string, bm *bookmarksFile) error {
 	obsDir := filepath.Join(vaultDir, ".obsidian")
 	if err := os.MkdirAll(obsDir, 0755); err != nil {
@@ -64,7 +65,7 @@ func saveBookmarks(vaultDir string, bm *bookmarksFile) error {
 		return fmt.Errorf("cannot marshal bookmarks: %w", err)
 	}
 
-	return os.WriteFile(bookmarksPath(vaultDir), data, 0644)
+	return atomicWriteFile(bookmarksPath(vaultDir), data, 0644)
 }
 
 // flattenBookmarks recursively collects all file-type bookmark paths,
@@ -158,7 +159,7 @@ func (v *Vault) BookmarksAdd(title string) (string, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	notePath, err := resolveNote(v.dir, title)
+	notePath, err := v.resolve(title)
 	if err != nil {
 		return "", err
 	}
@@ -195,7 +196,7 @@ func (v *Vault) BookmarksRemove(title string) error {
 		return fmt.Errorf("no bookmarks file found in vault")
 	}
 
-	notePath, err := resolveNote(v.dir, title)
+	notePath, err := v.resolve(title)
 	if err != nil {
 		return err
 	}

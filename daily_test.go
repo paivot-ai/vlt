@@ -243,3 +243,25 @@ func TestDaily_InvalidDate(t *testing.T) {
 		t.Fatal("expected error for invalid date")
 	}
 }
+
+// -----------------------------------------------------------------
+// Regression tests from the 2026-06-09 full review.
+// -----------------------------------------------------------------
+
+func TestMomentToGoFormatLiteralEscapes(t *testing.T) {
+	// [Week] is a Moment literal; "ee" inside it must not be token-replaced.
+	got := MomentToGoFormat("[Week of] YYYY-MM-DD")
+	want := "Week of 2006-01-02"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestMomentToGoFormatTwoLetterWeekday(t *testing.T) {
+	// Moment "dd" has no Go equivalent; best effort is "Mon" -- the important
+	// part is that the output is a VALID Go format token, not a literal "Mo".
+	got := MomentToGoFormat("dd YYYY")
+	if got != "Mon 2006" {
+		t.Errorf("got %q, want %q", got, "Mon 2006")
+	}
+}

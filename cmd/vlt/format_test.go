@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -450,5 +451,69 @@ func TestFormatListTreeEmpty(t *testing.T) {
 	})
 	if got != "" {
 		t.Errorf("empty tree should produce no output, got %q", got)
+	}
+}
+
+// -----------------------------------------------------------------
+// Regression tests from the 2026-06-09 full review.
+// -----------------------------------------------------------------
+
+func TestFormatListJSONEmptyIsArray(t *testing.T) {
+	got := strings.TrimSpace(captureStdout(func() {
+		formatList(nil, "json")
+	}))
+	if got != "[]" {
+		t.Errorf("nil list rendered as %q, want []", got)
+	}
+}
+
+func TestOutputTasksCSVEscaping(t *testing.T) {
+	tasks := []vlt.Task{
+		{Text: `say "hi", ok`, Done: false, Line: 3, File: "a.md"},
+	}
+	got := captureStdout(func() {
+		outputTasks(tasks, "csv")
+	})
+	// encoding/csv escapes embedded quotes by doubling them.
+	if !strings.Contains(got, `"say ""hi"", ok"`) {
+		t.Errorf("CSV quoting wrong (Go %%q is not CSV escaping): %q", got)
+	}
+}
+
+func TestFormatPropertiesJSONPreservesListsAndNesting(t *testing.T) {
+	fm := "---\ntype: debug\ntags:\n  - go\n  - cli\nmetadata:\n  type: user\nstack: [go, make]\n---"
+	got := captureStdout(func() {
+		formatProperties(fm, "json")
+	})
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, got)
+	}
+
+	if parsed["type"] != "debug" {
+		t.Errorf("type = %v, want debug", parsed["type"])
+	}
+	tags, ok := parsed["tags"].([]any)
+	if !ok || len(tags) != 2 || tags[0] != "go" || tags[1] != "cli" {
+		t.Errorf("tags block list flattened: %v", parsed["tags"])
+	}
+	stack, ok := parsed["stack"].([]any)
+	if !ok || len(stack) != 2 {
+		t.Errorf("inline list not parsed: %v", parsed["stack"])
+	}
+	meta, ok := parsed["metadata"].(map[string]any)
+	if !ok || meta["type"] != "user" {
+		t.Errorf("nested mapping flattened: %v", parsed["metadata"])
+	}
+}
+
+func TestFormatPropertiesYAMLRoundTripsBlockList(t *testing.T) {
+	fm := "---\ntags:\n  - go\n  - cli\n---"
+	got := captureStdout(func() {
+		formatProperties(fm, "yaml")
+	})
+	if !strings.Contains(got, "tags:\n  - go\n  - cli") {
+		t.Errorf("block list not re-emitted as YAML list: %q", got)
 	}
 }

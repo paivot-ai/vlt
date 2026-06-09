@@ -199,8 +199,19 @@ func updateVaultMdLinks(vaultDir, oldRelPath, newRelPath string, reg *Registry) 
 // Content inside inert zones (fenced code blocks, etc.) is masked before
 // matching so that references inside code blocks are ignored.
 func FindBacklinks(vaultDir, title string) ([]string, error) {
+	return findBacklinksAny(vaultDir, []string{title})
+}
+
+// findBacklinksAny returns relative paths of notes containing wikilinks or
+// embeds referencing ANY of the given targets (e.g. a note's title and its
+// path form "folder/Note"). Case-insensitive.
+func findBacklinksAny(vaultDir string, targets []string) ([]string, error) {
+	quoted := make([]string, len(targets))
+	for i, t := range targets {
+		quoted[i] = regexp.QuoteMeta(t)
+	}
 	pattern := regexp.MustCompile(
-		`(?i)!?\[\[` + regexp.QuoteMeta(title) +
+		`(?i)!?\[\[(?:` + strings.Join(quoted, "|") + `)` +
 			`(?:#[^\]|]*)?(?:\|[^\]]*)?` +
 			`\]\]`)
 

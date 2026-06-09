@@ -20,22 +20,29 @@ var (
 )
 
 const (
-	lockfileExclusiveLock = 0x00000002
+	lockfileExclusiveLock   = 0x00000002
+	lockfileFailImmediately = 0x00000001
+
+	errorLockViolation = 33 // ERROR_LOCK_VIOLATION
 )
 
-func LockVault(vaultDir string, exclusive bool) (func(), error) {
+// tryLockVault attempts a non-blocking lock on the vault directory.
+// Returns (release, busy, err): busy is true when another process holds a
+// conflicting lock; err reports any other failure. The retry/timeout policy
+// lives in LockVault (lock.go).
+func tryLockVault(vaultDir string, exclusive bool) (func(), bool, error) {
 	p := filepath.Join(vaultDir, LockFileName)
 	f, err := os.OpenFile(p, os.O_CREATE|os.O_RDWR, 0644)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	h := syscall.Handle(f.Fd())
 	ol := new(syscall.Overlapped)
 
-	var flags uint32
+	flags := uint32(lockfileFailImmediately)
 	if exclusive {
-		flags = lockfileExclusiveLock
+		flags |= lockfileExclusiveLock
 	}
 
 	r1, _, e1 := procLockFileEx.Call(
@@ -48,7 +55,10 @@ func LockVault(vaultDir string, exclusive bool) (func(), error) {
 	)
 	if r1 == 0 {
 		f.Close()
-		return nil, e1
+		if errno, ok := e1.(syscall.Errno); ok && errno == errorLockViolation {
+			return nil, true, nil
+		}
+		return nil, false, e1
 	}
 
 	return func() {
@@ -60,5 +70,5 @@ func LockVault(vaultDir string, exclusive bool) (func(), error) {
 			uintptr(unsafe.Pointer(ol)),
 		)
 		f.Close()
-	}, nil
+	}, false, nil
 }

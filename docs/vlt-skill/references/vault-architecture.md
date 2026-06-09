@@ -194,7 +194,7 @@ vlt vault="V" append file="Inbox Note" content="
 vlt vault="V" move path="_inbox/Inbox Note.md" to="decisions/Inbox Note.md"
 ```
 
-The `move` command updates all links across the vault automatically.
+The `move` command updates all links across the vault automatically, including path-form `[[folder/Note]]` links on folder-only moves. It refuses to overwrite an existing destination unless `force` is passed.
 
 ---
 

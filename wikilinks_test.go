@@ -570,3 +570,124 @@ func TestFindBacklinks_IncludesEmbeds(t *testing.T) {
 		t.Errorf("got %d results, want 1 (embed as backlink)", len(results))
 	}
 }
+
+// -----------------------------------------------------------------
+// Regression tests from the 2026-06-09 full review: path-form links
+// ([[folder/Note]]) and attachment embeds.
+// -----------------------------------------------------------------
+
+func TestBacklinksFindPathFormLinks(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.MkdirAll(filepath.Join(vaultDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "sub", "D.md"), []byte("# D\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "E.md"), []byte("link to [[sub/D]]\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "F.md"), []byte("link to [[D]]\n"), 0644)
+
+	results, err := v.Backlinks("D")
+	if err != nil {
+		t.Fatalf("backlinks: %v", err)
+	}
+
+	got := strings.Join(results, ",")
+	if !strings.Contains(got, "E.md") {
+		t.Errorf("path-form backlink [[sub/D]] not found: %v", results)
+	}
+	if !strings.Contains(got, "F.md") {
+		t.Errorf("title-form backlink [[D]] not found: %v", results)
+	}
+}
+
+func TestUnresolvedAcceptsPathFormAndAttachments(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.MkdirAll(filepath.Join(vaultDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "sub", "D.md"), []byte("# D\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "photo.png"), []byte("png"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Source.md"),
+		[]byte("[[sub/D]] and ![[photo.png]] and [[Really Missing]]\n"), 0644)
+
+	results, err := v.Unresolved()
+	if err != nil {
+		t.Fatalf("unresolved: %v", err)
+	}
+
+	if len(results) != 1 {
+		t.Fatalf("expected exactly 1 unresolved link, got %d: %+v", len(results), results)
+	}
+	if results[0].Target != "Really Missing" {
+		t.Errorf("unresolved target = %q, want %q", results[0].Target, "Really Missing")
+	}
+}
+
+func TestOrphansCountPathFormReferences(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.MkdirAll(filepath.Join(vaultDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "sub", "D.md"), []byte("# D\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Source.md"), []byte("see [[sub/D]]\n"), 0644)
+
+	orphans, err := v.Orphans()
+	if err != nil {
+		t.Fatalf("orphans: %v", err)
+	}
+
+	for _, o := range orphans {
+		if strings.Contains(o, "D.md") && strings.Contains(o, "sub") {
+			t.Errorf("sub/D.md reported orphan despite [[sub/D]] reference: %v", orphans)
+		}
+	}
+}
+
+func TestLinksResolvePathFormAndAttachments(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.MkdirAll(filepath.Join(vaultDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "sub", "D.md"), []byte("# D\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "photo.png"), []byte("png"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "Source.md"),
+		[]byte("[[sub/D]] ![[photo.png]] [[Missing]]\n"), 0644)
+
+	links, err := v.Links("Source")
+	if err != nil {
+		t.Fatalf("links: %v", err)
+	}
+
+	byTarget := make(map[string]LinkInfo)
+	for _, l := range links {
+		byTarget[l.Target] = l
+	}
+
+	if l := byTarget["sub/D"]; l.Broken {
+		t.Error("[[sub/D]] reported broken")
+	}
+	if l := byTarget["photo.png"]; l.Broken {
+		t.Error("![[photo.png]] reported broken")
+	}
+	if l := byTarget["Missing"]; !l.Broken {
+		t.Error("[[Missing]] not reported broken")
+	}
+}
+
+func TestMoveUpdatesPathFormLinks(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.MkdirAll(filepath.Join(vaultDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "sub", "D.md"), []byte("# D\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "E.md"), []byte("see [[sub/D]]\n"), 0644)
+
+	// Folder-only move: title unchanged, path changes.
+	if _, err := v.Move("sub/D.md", "other/D.md"); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(vaultDir, "E.md"))
+	if !strings.Contains(string(data), "[[other/D]]") {
+		t.Errorf("path-form link not updated after folder move: %q", data)
+	}
+}

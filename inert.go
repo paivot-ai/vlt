@@ -194,10 +194,19 @@ var inlineMathPattern = regexp.MustCompile(`\$([^\s$][^$\n]*?[^\s$])\$`)
 // The $ delimiters themselves are preserved; only the content between them is
 // replaced with spaces. This pass runs AFTER display math so that $$ is not
 // partially consumed by the inline math pattern.
+//
+// Following Pandoc's rule, a span whose closing $ is immediately followed by
+// a digit is NOT treated as math. This keeps prose with two dollar amounts
+// ("paid $50 for [[Server]] and $20") from being masked, which would
+// otherwise hide wikilinks and tags between the amounts.
 func maskInlineMath(text string) string {
 	buf := []byte(text)
 
 	for _, loc := range inlineMathPattern.FindAllSubmatchIndex(buf, -1) {
+		// loc[0], loc[1] = whole match; loc[1] is the index just past the closing $.
+		if loc[1] < len(buf) && buf[loc[1]] >= '0' && buf[loc[1]] <= '9' {
+			continue
+		}
 		// loc[2], loc[3] = start, end of group 1 (content between $ delimiters)
 		maskRegion(buf, loc[2], loc[3])
 	}

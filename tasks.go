@@ -56,7 +56,7 @@ func (v *Vault) Tasks(opts TaskOptions) ([]Task, error) {
 
 	// Single file mode
 	if opts.File != "" {
-		path, err := resolveNote(v.dir, opts.File)
+		path, err := v.resolve(opts.File)
 		if err != nil {
 			return nil, err
 		}

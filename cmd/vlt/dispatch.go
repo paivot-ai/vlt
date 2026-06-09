@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	vlt "github.com/paivot-ai/vlt"
@@ -151,9 +152,10 @@ func dispatchCreate(v *vlt.Vault, params map[string]string, silent bool, timesta
 	err := v.Create(name, notePath, content, silent, timestamps)
 	if err != nil {
 		if err == vlt.ErrNoteExists {
-			if !silent {
-				fmt.Fprintf(os.Stderr, "note already exists: %s\n", notePath)
-			}
+			// Always report on stderr -- even with silent -- so a caller can
+			// tell the note was NOT written. The exit code stays 0 so
+			// create-if-missing usage remains scriptable.
+			fmt.Fprintf(os.Stderr, "note already exists: %s\n", notePath)
 			return nil
 		}
 		return err
@@ -225,21 +227,32 @@ func dispatchPatch(v *vlt.Vault, params map[string]string, delete bool, timestam
 	})
 }
 
-func dispatchMove(v *vlt.Vault, params map[string]string) error {
+func dispatchMove(v *vlt.Vault, params map[string]string, force bool) error {
 	from := params["path"]
 	to := params["to"]
 	if from == "" || to == "" {
 		return fmt.Errorf("move requires path=\"<from>\" to=\"<to>\"")
 	}
-	result, err := v.Move(from, to)
+	var result vlt.MoveResult
+	var err error
+	if force {
+		result, err = v.MoveForce(from, to)
+	} else {
+		result, err = v.Move(from, to)
+	}
 	if err != nil {
 		return err
 	}
 	fmt.Printf("moved: %s -> %s\n", from, to)
 	if result.WikilinksUpdated > 0 {
-		oldTitle := result.OldTitle
-		newTitle := result.NewTitle
-		fmt.Printf("updated [[%s]] -> [[%s]] in %d file(s)\n", oldTitle, newTitle, result.WikilinksUpdated)
+		oldRef := result.OldTitle
+		newRef := result.NewTitle
+		if oldRef == newRef {
+			// Folder-only move: the updated links were path-form.
+			oldRef = strings.TrimSuffix(from, ".md")
+			newRef = strings.TrimSuffix(to, ".md")
+		}
+		fmt.Printf("updated [[%s]] -> [[%s]] in %d file(s)\n", oldRef, newRef, result.WikilinksUpdated)
 	}
 	if result.MdLinksUpdated > 0 {
 		fmt.Printf("updated [...](%s) -> [...](%s) in %d file(s)\n", from, to, result.MdLinksUpdated)

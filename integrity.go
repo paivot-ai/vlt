@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,6 +84,9 @@ func registryDir(vaultDir string) string {
 }
 
 // openRegistry loads (or creates) a Registry for the given vault directory.
+// Failures other than "no registry yet" are reported on stderr: for a tamper
+// detection feature, silently resetting on corruption would itself hide
+// tampering.
 func openRegistry(vaultDir string) *Registry {
 	dir := registryDir(vaultDir)
 	r := &Registry{
@@ -90,16 +94,33 @@ func openRegistry(vaultDir string) *Registry {
 		entries: make(map[string]registryEntry),
 	}
 
-	data, err := os.ReadFile(filepath.Join(dir, "registry.json"))
+	regPath := filepath.Join(dir, "registry.json")
+	data, err := os.ReadFile(regPath)
 	if err != nil {
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "vlt: warning: cannot read integrity registry %s: %v\n", regPath, err)
+		}
 		return r // no registry yet
 	}
 
 	if err := json.Unmarshal(data, &r.entries); err != nil {
-		return r // corrupted, start fresh
+		fmt.Fprintf(os.Stderr, "vlt: warning: integrity registry %s is corrupted (%v); integrity status resets -- run integrity:baseline to re-register\n", regPath, err)
+		r.entries = make(map[string]registryEntry)
+		return r
 	}
 	r.exists = true
 	return r
+}
+
+// ReloadRegistry re-reads the integrity registry from disk. Call after
+// acquiring the vault lock: the registry is first loaded when the vault is
+// opened, before the lock is held, so a concurrent writer may have flushed
+// new entries in between. Without the reload those entries would be lost on
+// the next flush.
+func (v *Vault) ReloadRegistry() {
+	v.mu.Lock()
+	v.registry = openRegistry(v.dir)
+	v.mu.Unlock()
 }
 
 // contentHash computes the SHA-256 hex digest of content.
@@ -115,9 +136,18 @@ func (r *Registry) register(vaultDir, absPath string, content []byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if !r.setEntryLocked(vaultDir, absPath, content) {
+		return
+	}
+	r.flush()
+}
+
+// setEntryLocked records a hash entry without flushing. Caller must hold r.mu.
+// Returns false if the path could not be made vault-relative.
+func (r *Registry) setEntryLocked(vaultDir, absPath string, content []byte) bool {
 	rel, err := filepath.Rel(vaultDir, absPath)
 	if err != nil {
-		return
+		return false
 	}
 
 	r.entries[rel] = registryEntry{
@@ -125,7 +155,7 @@ func (r *Registry) register(vaultDir, absPath string, content []byte) {
 		Ts:   time.Now().UTC().Format(time.RFC3339),
 	}
 	r.exists = true
-	r.flush()
+	return true
 }
 
 // deregister removes a file from the registry.
@@ -168,22 +198,28 @@ func (r *Registry) verify(vaultDir, absPath string, content []byte) IntegritySta
 }
 
 // flush writes the registry to disk atomically (write temp + rename).
-// Caller must hold r.mu.
+// Caller must hold r.mu. Failures are reported on stderr rather than
+// silently dropped -- a failed flush means integrity tracking is stale.
 func (r *Registry) flush() {
 	if err := os.MkdirAll(r.dir, 0700); err != nil {
+		fmt.Fprintf(os.Stderr, "vlt: warning: cannot create integrity registry dir %s: %v\n", r.dir, err)
 		return
 	}
 
 	data, err := json.MarshalIndent(r.entries, "", "  ")
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "vlt: warning: cannot encode integrity registry: %v\n", err)
 		return
 	}
 
 	tmpPath := filepath.Join(r.dir, "registry.json.tmp")
 	if err := os.WriteFile(tmpPath, data, 0600); err != nil {
+		fmt.Fprintf(os.Stderr, "vlt: warning: cannot write integrity registry: %v\n", err)
 		return
 	}
-	os.Rename(tmpPath, filepath.Join(r.dir, "registry.json"))
+	if err := os.Rename(tmpPath, filepath.Join(r.dir, "registry.json")); err != nil {
+		fmt.Fprintf(os.Stderr, "vlt: warning: cannot update integrity registry: %v\n", err)
+	}
 }
 
 // VerifyIntegrity checks the integrity of specific vault files.
@@ -217,7 +253,7 @@ func (v *Vault) VerifyIntegrity(paths ...string) map[string]IntegrityStatus {
 	}
 
 	for _, title := range paths {
-		path, err := resolveNote(v.dir, title)
+		path, err := v.resolve(title)
 		if err != nil {
 			continue
 		}
@@ -232,11 +268,17 @@ func (v *Vault) VerifyIntegrity(paths ...string) map[string]IntegrityStatus {
 }
 
 // IntegrityBaseline walks all .md files in the vault and registers each one.
+// Entries are recorded in memory and flushed to disk once, so baselining a
+// large vault does not rewrite the registry file per note.
 func (v *Vault) IntegrityBaseline() error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	return filepath.WalkDir(v.dir, func(path string, d os.DirEntry, err error) error {
+	r := v.registry
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	walkErr := filepath.WalkDir(v.dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -251,9 +293,12 @@ func (v *Vault) IntegrityBaseline() error {
 		if readErr != nil {
 			return nil
 		}
-		v.registry.register(v.dir, path, data)
+		r.setEntryLocked(v.dir, path, data)
 		return nil
 	})
+
+	r.flush()
+	return walkErr
 }
 
 // IntegrityAcknowledge re-reads a file and updates its registry entry,
@@ -262,7 +307,7 @@ func (v *Vault) IntegrityAcknowledge(title string) error {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
-	path, err := resolveNote(v.dir, title)
+	path, err := v.resolve(title)
 	if err != nil {
 		return err
 	}
@@ -278,12 +323,17 @@ func (v *Vault) IntegrityAcknowledge(title string) error {
 
 // IntegrityAcknowledgeSince re-registers all .md files modified within the
 // given duration. Returns the number of files re-registered.
+// Entries are flushed to disk once at the end.
 func (v *Vault) IntegrityAcknowledgeSince(d time.Duration) (int, error) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
 	cutoff := time.Now().Add(-d)
 	count := 0
+
+	r := v.registry
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	err := filepath.WalkDir(v.dir, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
@@ -308,11 +358,15 @@ func (v *Vault) IntegrityAcknowledgeSince(d time.Duration) (int, error) {
 		if readErr != nil {
 			return nil
 		}
-		v.registry.register(v.dir, path, data)
-		count++
+		if r.setEntryLocked(v.dir, path, data) {
+			count++
+		}
 		return nil
 	})
 
+	if count > 0 {
+		r.flush()
+	}
 	return count, err
 }
 

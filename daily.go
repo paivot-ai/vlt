@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -78,9 +79,16 @@ func parseDailyJSON(data []byte, config *dailyConfig) {
 	}
 }
 
+// momentLiteralPattern matches Moment.js escaped literal segments: [text].
+var momentLiteralPattern = regexp.MustCompile(`\[([^\]]*)\]`)
+
 // MomentToGoFormat translates common Moment.js date format tokens to Go's
 // reference time format. Uses a two-pass approach with placeholders to avoid
 // earlier replacements being corrupted by later ones (e.g., "a" inside "January").
+// Moment escape segments ([literal text]) are preserved verbatim with the
+// brackets removed, matching Moment's behaviour.
+// Note: Moment's "dd" (two-letter weekday) has no Go equivalent and maps to
+// "Mon" (three letters) as a best effort.
 func MomentToGoFormat(moment string) string {
 	// Order matters: longest tokens first to avoid partial matches
 	replacements := []struct {
@@ -97,7 +105,7 @@ func MomentToGoFormat(moment string) string {
 		{"D", "2"},
 		{"dddd", "Monday"},
 		{"ddd", "Mon"},
-		{"dd", "Mo"},
+		{"dd", "Mon"},
 		{"HH", "15"},
 		{"hh", "03"},
 		{"mm", "04"},
@@ -106,8 +114,14 @@ func MomentToGoFormat(moment string) string {
 		{"a", "pm"},
 	}
 
+	// Pass 0: protect [literal] segments from token replacement.
+	var literals []string
+	result := momentLiteralPattern.ReplaceAllStringFunc(moment, func(m string) string {
+		literals = append(literals, m[1:len(m)-1])
+		return fmt.Sprintf("\x01%d\x01", len(literals)-1)
+	})
+
 	// Pass 1: replace Moment tokens with unique placeholders
-	result := moment
 	for i, r := range replacements {
 		placeholder := fmt.Sprintf("\x00%d\x00", i)
 		result = strings.ReplaceAll(result, r.moment, placeholder)
@@ -117,6 +131,11 @@ func MomentToGoFormat(moment string) string {
 	for i, r := range replacements {
 		placeholder := fmt.Sprintf("\x00%d\x00", i)
 		result = strings.ReplaceAll(result, placeholder, r.goFmt)
+	}
+
+	// Pass 3: restore protected literals (brackets removed).
+	for i, lit := range literals {
+		result = strings.ReplaceAll(result, fmt.Sprintf("\x01%d\x01", i), lit)
 	}
 
 	return result
@@ -195,6 +214,7 @@ func (v *Vault) Daily(dateStr string) (DailyResult, error) {
 		return DailyResult{}, err
 	}
 	v.registry.register(v.dir, fullPath, contentBytes)
+	v.invalidateIndex()
 
 	return DailyResult{
 		RelPath: relPath,

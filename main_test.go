@@ -1,6 +1,7 @@
 package vlt
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -3155,5 +3156,219 @@ func TestPatchOldNewSkipsFrontmatter(t *testing.T) {
 	// Frontmatter should be untouched.
 	if !strings.Contains(string(got), "type: note") {
 		t.Fatal("frontmatter should be preserved")
+	}
+}
+
+// -----------------------------------------------------------------
+// Regression tests from the 2026-06-09 full review.
+// -----------------------------------------------------------------
+
+func TestMoveRefusesToOverwriteDestination(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.WriteFile(filepath.Join(vaultDir, "A.md"), []byte("# A\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "B.md"), []byte("# B\n"), 0644)
+
+	_, err := v.Move("A.md", "B.md")
+	if !errors.Is(err, ErrDestinationExists) {
+		t.Fatalf("expected ErrDestinationExists, got %v", err)
+	}
+
+	// Both files must be intact.
+	a, _ := os.ReadFile(filepath.Join(vaultDir, "A.md"))
+	b, _ := os.ReadFile(filepath.Join(vaultDir, "B.md"))
+	if string(a) != "# A\n" || string(b) != "# B\n" {
+		t.Errorf("files modified by refused move: A=%q B=%q", a, b)
+	}
+}
+
+func TestMoveForceOverwritesDestination(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.WriteFile(filepath.Join(vaultDir, "A.md"), []byte("# A\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "B.md"), []byte("# B\n"), 0644)
+
+	if _, err := v.MoveForce("A.md", "B.md"); err != nil {
+		t.Fatalf("MoveForce: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(vaultDir, "A.md")); !os.IsNotExist(err) {
+		t.Error("source still exists after forced move")
+	}
+	b, _ := os.ReadFile(filepath.Join(vaultDir, "B.md"))
+	if string(b) != "# A\n" {
+		t.Errorf("destination content = %q, want %q", b, "# A\n")
+	}
+}
+
+func TestDeleteTrashCollisionGetsSuffix(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.MkdirAll(filepath.Join(vaultDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "sub", "C.md"), []byte("first\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "C.md"), []byte("second\n"), 0644)
+
+	if _, err := v.Delete("", "sub/C.md", false); err != nil {
+		t.Fatalf("first delete: %v", err)
+	}
+	if _, err := v.Delete("", "C.md", false); err != nil {
+		t.Fatalf("second delete: %v", err)
+	}
+
+	first, err := os.ReadFile(filepath.Join(vaultDir, ".trash", "C.md"))
+	if err != nil {
+		t.Fatalf("first trashed file missing: %v", err)
+	}
+	second, err := os.ReadFile(filepath.Join(vaultDir, ".trash", "C 1.md"))
+	if err != nil {
+		t.Fatalf("second trashed file missing (no collision suffix): %v", err)
+	}
+	if string(first) != "first\n" || string(second) != "second\n" {
+		t.Errorf("trash contents wrong: %q / %q -- a trashed note was destroyed", first, second)
+	}
+}
+
+func TestAppendInsertsNewlineWhenFileLacksOne(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.WriteFile(filepath.Join(vaultDir, "NoNL.md"), []byte("# Test"), 0644)
+
+	if err := v.Append("NoNL", "appended", false); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(vaultDir, "NoNL.md"))
+	if string(data) != "# Test\nappended" {
+		t.Errorf("got %q, want %q", data, "# Test\nappended")
+	}
+}
+
+func TestAppendLeavesNoTempFiles(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.WriteFile(filepath.Join(vaultDir, "T.md"), []byte("# T\n"), 0644)
+	if err := v.Append("T", "more\n", false); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	entries, _ := os.ReadDir(vaultDir)
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Errorf("temp file left behind: %s", e.Name())
+		}
+	}
+}
+
+func TestPrependWithoutTrailingNewlineDoesNotMerge(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.WriteFile(filepath.Join(vaultDir, "P.md"), []byte("body line\n"), 0644)
+
+	if err := v.Prepend("P", "TOP", false); err != nil {
+		t.Fatalf("prepend: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(vaultDir, "P.md"))
+	if string(data) != "TOP\nbody line\n" {
+		t.Errorf("got %q, want %q", data, "TOP\nbody line\n")
+	}
+}
+
+func TestWriteEnsuresTrailingNewline(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.WriteFile(filepath.Join(vaultDir, "W.md"), []byte("old\n"), 0644)
+
+	if err := v.Write("W", "new body without newline", false); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(vaultDir, "W.md"))
+	if !strings.HasSuffix(string(data), "\n") {
+		t.Errorf("file does not end with newline: %q", data)
+	}
+}
+
+func TestPropertySetRejectsInjection(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.WriteFile(filepath.Join(vaultDir, "Inj.md"),
+		[]byte("---\nstatus: active\n---\nbody\n"), 0644)
+
+	if err := v.PropertySet("Inj", "status", "x\nevil: y"); err == nil {
+		t.Error("value with newline accepted; frontmatter injection possible")
+	}
+	if err := v.PropertySet("Inj", "bad:name", "x"); err == nil {
+		t.Error("name with colon accepted")
+	}
+	if err := v.PropertySet("Inj", "-dash", "x"); err == nil {
+		t.Error("name starting with dash accepted")
+	}
+	if err := v.PropertySet("Inj", "", "x"); err == nil {
+		t.Error("empty name accepted")
+	}
+}
+
+func TestPropertySetIgnoresNestedKeys(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	content := "---\nmetadata:\n  type: user\n---\nbody\n"
+	os.WriteFile(filepath.Join(vaultDir, "Nested.md"), []byte(content), 0644)
+
+	if err := v.PropertySet("Nested", "type", "decision"); err != nil {
+		t.Fatalf("property:set: %v", err)
+	}
+
+	data, _ := os.ReadFile(filepath.Join(vaultDir, "Nested.md"))
+	text := string(data)
+	if !strings.Contains(text, "  type: user") {
+		t.Errorf("nested metadata.type was modified: %q", text)
+	}
+	if !strings.Contains(text, "\ntype: decision\n") {
+		t.Errorf("top-level type not added: %q", text)
+	}
+}
+
+func TestSearchPropertyFilterIgnoresNestedKeys(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.WriteFile(filepath.Join(vaultDir, "NestedOnly.md"),
+		[]byte("---\nmetadata:\n  type: user\n---\nbody\n"), 0644)
+	os.WriteFile(filepath.Join(vaultDir, "TopLevel.md"),
+		[]byte("---\ntype: user\n---\nbody\n"), 0644)
+
+	results, err := v.Search(SearchOptions{Query: "[type:user]"})
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if len(results) != 1 || results[0].Title != "TopLevel" {
+		t.Errorf("filter matched nested key: got %+v, want only TopLevel", results)
+	}
+}
+
+func TestResolveByVaultRelativePath(t *testing.T) {
+	vaultDir := t.TempDir()
+	v := &Vault{dir: vaultDir, registry: openRegistry(vaultDir)}
+
+	os.MkdirAll(filepath.Join(vaultDir, "sub"), 0755)
+	os.WriteFile(filepath.Join(vaultDir, "sub", "D.md"), []byte("# D\n"), 0644)
+
+	result, err := v.Read("sub/D", "")
+	if err != nil {
+		t.Fatalf("read by path form: %v", err)
+	}
+	if result.Content != "# D\n" {
+		t.Errorf("content = %q", result.Content)
 	}
 }

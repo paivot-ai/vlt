@@ -2542,3 +2542,35 @@ func TestE2EMaskingDoesNotCorruptContent(t *testing.T) {
 		}
 	}
 }
+
+// -----------------------------------------------------------------
+// Regression tests from the 2026-06-09 full review: inline math must
+// not swallow wikilinks between two dollar amounts (Pandoc digit rule).
+// -----------------------------------------------------------------
+
+func TestInlineMathDoesNotMaskBetweenDollarAmounts(t *testing.T) {
+	text := "Paid $50 for [[Server]] and $20 more"
+	links := ParseWikilinks(text)
+	if len(links) != 1 || links[0].Title != "Server" {
+		t.Errorf("wikilink between dollar amounts was masked: %+v", links)
+	}
+}
+
+func TestInlineMathStillMasksRealMath(t *testing.T) {
+	masked := MaskInertContent("the formula $x+y$ holds")
+	if strings.Contains(masked, "x+y") {
+		t.Errorf("real inline math not masked: %q", masked)
+	}
+	// Delimiters preserved.
+	if strings.Count(masked, "$") != 2 {
+		t.Errorf("math delimiters not preserved: %q", masked)
+	}
+}
+
+func TestInlineMathMasksLinkInsideRealMath(t *testing.T) {
+	// Closing $ followed by space -- genuine math span, content masked.
+	links := ParseWikilinks("math $a [[L]] b$ end")
+	if len(links) != 0 {
+		t.Errorf("link inside math span should be masked: %+v", links)
+	}
+}

@@ -37,6 +37,9 @@ func outputFormat(flags map[string]bool) string {
 func formatList(items []string, format string) {
 	switch format {
 	case "json":
+		if items == nil {
+			items = []string{}
+		}
 		data, _ := json.Marshal(items)
 		fmt.Println(string(data))
 	case "csv":
@@ -352,6 +355,9 @@ func formatSearchWithContext(matches []vlt.ContextMatch, format string) {
 func formatLinks(links []vlt.LinkInfo, format string) {
 	switch format {
 	case "json":
+		if links == nil {
+			links = []vlt.LinkInfo{}
+		}
 		data, _ := json.Marshal(links)
 		fmt.Println(string(data))
 	case "csv":
@@ -393,6 +399,9 @@ func formatLinks(links []vlt.LinkInfo, format string) {
 func formatUnresolved(results []vlt.UnresolvedLink, format string) {
 	switch format {
 	case "json":
+		if results == nil {
+			results = []vlt.UnresolvedLink{}
+		}
 		data, _ := json.Marshal(results)
 		fmt.Println(string(data))
 	case "csv":
@@ -425,62 +434,169 @@ func formatProperties(text string, format string) {
 		return
 	}
 
-	lines := strings.Split(text, "\n")
-	props := make(map[string]string)
-	var keys []string
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "---" || line == "" {
-			continue
-		}
-		if idx := strings.Index(line, ":"); idx > 0 {
-			key := strings.TrimSpace(line[:idx])
-			val := strings.TrimSpace(line[idx+1:])
-			props[key] = val
-			keys = append(keys, key)
-		}
-	}
-
-	sort.Strings(keys)
+	props := parseFrontmatterProps(text)
+	sort.Slice(props, func(i, j int) bool { return props[i].key < props[j].key })
 
 	switch format {
 	case "json":
-		data, _ := json.Marshal(props)
+		out := make(map[string]any, len(props))
+		for _, p := range props {
+			out[p.key] = p.value()
+		}
+		data, _ := json.Marshal(out)
 		fmt.Println(string(data))
 	case "csv":
 		w := csv.NewWriter(os.Stdout)
 		w.Write([]string{"key", "value"})
-		for _, k := range keys {
-			w.Write([]string{k, props[k]})
+		for _, p := range props {
+			w.Write([]string{p.key, p.cell()})
 		}
 		w.Flush()
 	case "tsv":
 		fmt.Println("key\tvalue")
-		for _, k := range keys {
-			fmt.Printf("%s\t%s\n", k, props[k])
+		for _, p := range props {
+			fmt.Printf("%s\t%s\n", p.key, p.cell())
 		}
 	case "yaml":
-		for _, k := range keys {
-			fmt.Printf("%s: %s\n", k, props[k])
+		for _, p := range props {
+			switch {
+			case p.list != nil:
+				fmt.Printf("%s:\n", p.key)
+				for _, item := range p.list {
+					fmt.Printf("  - %s\n", yamlEscapeValue(item))
+				}
+			case p.nested != nil:
+				fmt.Printf("%s:\n", p.key)
+				for _, k := range p.order {
+					fmt.Printf("  %s: %s\n", k, yamlEscapeValue(p.nested[k]))
+				}
+			default:
+				fmt.Printf("%s: %s\n", p.key, yamlEscapeValue(p.scalar))
+			}
 		}
 	}
+}
+
+// parsedProp holds one top-level frontmatter property. Exactly one of
+// scalar, list, or nested is populated.
+type parsedProp struct {
+	key    string
+	scalar string
+	list   []string          // block or inline list items
+	nested map[string]string // one-level nested mapping (e.g. metadata:)
+	order  []string          // nested key order
+}
+
+// value returns the property value as a JSON-compatible Go value.
+func (p parsedProp) value() any {
+	switch {
+	case p.list != nil:
+		return p.list
+	case p.nested != nil:
+		return p.nested
+	default:
+		return p.scalar
+	}
+}
+
+// cell renders the property value as a single table cell. Lists and nested
+// mappings are JSON-encoded so CSV/TSV rows stay one-line.
+func (p parsedProp) cell() string {
+	if p.list == nil && p.nested == nil {
+		return p.scalar
+	}
+	data, err := json.Marshal(p.value())
+	if err != nil {
+		return p.scalar
+	}
+	return string(data)
+}
+
+// parseFrontmatterProps parses a raw frontmatter block (with --- delimiters)
+// into top-level properties, preserving block lists and one-level nested
+// mappings instead of flattening them.
+func parseFrontmatterProps(text string) []parsedProp {
+	var props []parsedProp
+	cur := -1 // index into props of the open block-valued key
+
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "---" || trimmed == "" {
+			continue
+		}
+
+		indented := line != "" && (line[0] == ' ' || line[0] == '\t')
+
+		if !indented {
+			cur = -1
+			idx := strings.Index(line, ":")
+			if idx <= 0 {
+				continue
+			}
+			p := parsedProp{key: strings.TrimSpace(line[:idx]), scalar: strings.TrimSpace(line[idx+1:])}
+			// Inline list: key: [a, b, c]
+			if strings.HasPrefix(p.scalar, "[") && strings.HasSuffix(p.scalar, "]") {
+				inner := p.scalar[1 : len(p.scalar)-1]
+				p.scalar = ""
+				for _, item := range strings.Split(inner, ",") {
+					item = strings.Trim(strings.TrimSpace(item), "\"'")
+					if item != "" {
+						p.list = append(p.list, item)
+					}
+				}
+				if p.list == nil {
+					p.list = []string{}
+				}
+			}
+			props = append(props, p)
+			if p.scalar == "" && p.list == nil {
+				cur = len(props) - 1
+			}
+			continue
+		}
+
+		// Indented continuation of an open block-valued key.
+		if cur < 0 {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "- ") {
+			item := strings.Trim(strings.TrimSpace(strings.TrimPrefix(trimmed, "- ")), "\"'")
+			if item != "" {
+				props[cur].list = append(props[cur].list, item)
+			}
+		} else if idx := strings.Index(trimmed, ":"); idx > 0 {
+			if props[cur].nested == nil {
+				props[cur].nested = make(map[string]string)
+			}
+			k := strings.TrimSpace(trimmed[:idx])
+			props[cur].nested[k] = strings.TrimSpace(trimmed[idx+1:])
+			props[cur].order = append(props[cur].order, k)
+		}
+	}
+
+	return props
 }
 
 // outputTasks prints tasks in the requested format.
 func outputTasks(tasks []vlt.Task, format string) {
 	switch format {
 	case "json":
+		if tasks == nil {
+			tasks = []vlt.Task{}
+		}
 		data, _ := json.Marshal(tasks)
 		fmt.Println(string(data))
 	case "csv":
-		fmt.Println("done,text,line,file")
+		w := csv.NewWriter(os.Stdout)
+		w.Write([]string{"done", "text", "line", "file"})
 		for _, t := range tasks {
 			done := "false"
 			if t.Done {
 				done = "true"
 			}
-			fmt.Printf("%s,%q,%d,%s\n", done, t.Text, t.Line, t.File)
+			w.Write([]string{done, t.Text, fmt.Sprintf("%d", t.Line), t.File})
 		}
+		w.Flush()
 	case "yaml":
 		for _, t := range tasks {
 			fmt.Printf("- text: %s\n  done: %v\n  line: %d\n  file: %s\n", yamlEscapeValue(t.Text), t.Done, t.Line, t.File)
@@ -593,7 +709,8 @@ func yamlEscapeValue(s string) string {
 		}
 	}
 	if needsQuoting {
-		escaped := strings.ReplaceAll(s, `"`, `\"`)
+		escaped := strings.ReplaceAll(s, `\`, `\\`)
+		escaped = strings.ReplaceAll(escaped, `"`, `\"`)
 		return `"` + escaped + `"`
 	}
 	return s

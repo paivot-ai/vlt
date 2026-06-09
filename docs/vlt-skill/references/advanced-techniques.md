@@ -39,6 +39,9 @@ vlt handles the full Obsidian wikilink specification:
 | Embed | `![[Note]]` | embedded note |
 | Combined | `![[Note#Section\|Text]]` | all components |
 
+Path-form links (`[[folder/Note]]`) and attachment embeds (`![[photo.png]]`) resolve
+like in Obsidian: `backlinks`, `links`, `orphans`, and `unresolved` all account for them.
+
 When `move` renames a note, all wikilink variants are updated. Heading, block,
 and display-text fragments are preserved. Markdown links (`[text](path.md)`) are
 also updated with recomputed relative paths.
@@ -350,11 +353,14 @@ if result.Integrity == vlt.IntegrityMismatch {
 
 vlt uses kernel-managed advisory locks for safe concurrent access:
 
-- **Read commands** acquire a shared lock (multiple readers allowed)
-- **Write commands** acquire an exclusive lock (blocks other writers and readers)
+- **Read commands** are lock-free by default (atomic writes guarantee a complete
+  old or new file); pass `--strict-flock` to acquire a shared lock instead
+- **Write commands** acquire an exclusive lock (blocks other writers)
 - Lock file: `.vlt.lock` in the vault root
 - Implementation: `flock(2)` on Unix, `LockFileEx`/`UnlockFileEx` on Windows
 - Auto-releases on process crash or kill -- no stale lock cleanup needed
+- **Timeout**: acquisition fails after 10 seconds instead of waiting forever on a
+  wedged holder; tune with `VLT_LOCK_TIMEOUT` (a Go duration like `30s`, `0` = wait forever)
 
 This is transparent to CLI users. Library consumers can use `vlt.LockVault()` directly.
 
@@ -366,7 +372,7 @@ vlt is designed for speed with zero external dependencies:
 
 - **No index or database**: Reads directly from filesystem
 - **No daemon**: Stateless, runs and exits
-- **Two-pass resolution**: Fast path avoids file I/O for exact filename matches
+- **Lazy per-invocation index**: One vault walk serves all lookups in a process; the alias map is built only when a filename lookup misses
 - **Compiled Go binary**: Sub-millisecond startup
 
 For large vaults (10,000+ notes), commands that scan all files (`search`, `orphans`,

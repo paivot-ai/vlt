@@ -13,7 +13,7 @@ description: >-
   knowledge management.
   Provides comprehensive guidance for using vlt in agentic AI workflows,
   CI/CD pipelines, and shell scripting.
-version: 0.10.2
+version: 0.11.0
 ---
 
 # vlt -- Obsidian Vault CLI for Coding Agents
@@ -82,7 +82,7 @@ All listing commands support structured output:
 | `write` | Replace body, keep frontmatter | `file=`, `content=` (or stdin) |
 | `patch` | Edit by heading, line, or find-replace | `file=`, `heading=`/`line=`, `content=`/`delete`/`old=`+`new=` |
 | `delete` | Trash or hard-delete | `file=`/`path=`, `permanent` (optional) |
-| `move` | Rename with link repair | `path=`, `to=` |
+| `move` | Rename with link repair | `path=`, `to=`, `force` (overwrite existing destination) |
 | `daily` | Create/read daily note | `date=` (optional, default today) |
 | `files` | List vault files | `folder=`, `ext=`, `total` (optional) |
 
@@ -251,13 +251,17 @@ cat data.md | vlt vault="V" create name="Import" path="_inbox/Import.md"
 
 - **Exit codes**: 0 on success, 1 on error. Empty results exit 0 silently (Unix convention).
 - **Error output**: Errors go to stderr with `vlt:` prefix.
-- **Link repair on move**: `move` updates all wikilinks and markdown links vault-wide.
+- **Link repair on move**: `move` updates all wikilinks (title-form and path-form `[[folder/Note]]`) and markdown links vault-wide. `move` refuses to overwrite an existing destination unless `force` is passed.
 - **Inert zones**: Links, tags, and references inside code blocks, comments, and math are ignored.
 - **Timestamps**: Opt-in via `timestamps` flag or `VLT_TIMESTAMPS=1` env var.
 - **Case-insensitive**: Tag matching and alias resolution are case-insensitive.
+- **Note resolution**: `file=` accepts a title, a frontmatter alias, or a vault-relative path (`file="sub/Note"`).
+- **Trash safety**: Trashed notes never overwrite each other; collisions get a numeric suffix (`Note 1.md`).
+- **Strict flags**: Unknown bare-word flags are rejected with a suggestion instead of silently ignored.
+- **Create idempotency**: `create` on an existing note exits 0 but always reports "note already exists" on stderr, even with `silent`.
 - **Integrity tracking**: All write operations register SHA-256 hashes. `read` warns on mismatch (informational, not blocking). Use `integrity:baseline` for initial registration, `integrity:acknowledge` to accept external changes.
 - **Path traversal protection**: All user-supplied paths are validated against the vault boundary. Absolute paths, `..` components, and paths resolving outside the vault are rejected.
-- **Advisory locking**: Write commands acquire exclusive `flock(2)` locks; read commands acquire shared locks. Auto-releases on crash.
+- **Advisory locking**: Write commands acquire exclusive `flock(2)` locks; reads are lock-free by default (`--strict-flock` opts in to shared locks). Lock waits time out after 10s (tune with `VLT_LOCK_TIMEOUT`, `0` = wait forever). Auto-releases on crash.
 - **Relative vault paths**: In addition to vault names and absolute paths, relative paths (e.g., `.vault/knowledge`) are supported.
 
 ## Additional Resources

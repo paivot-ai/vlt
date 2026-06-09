@@ -121,3 +121,46 @@ func TestIsWriteCommand(t *testing.T) {
 		}
 	}
 }
+
+// -----------------------------------------------------------------
+// Regression tests from the 2026-06-09 full review: lock acquisition
+// must time out instead of blocking forever on a wedged holder.
+// -----------------------------------------------------------------
+
+func TestLockVaultTimesOutWhenHeld(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("VLT_LOCK_TIMEOUT", "200ms")
+
+	unlock, err := LockVault(dir, true)
+	if err != nil {
+		t.Fatalf("first lock: %v", err)
+	}
+	defer unlock()
+
+	start := time.Now()
+	_, err = LockVault(dir, true)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("lock wait took %s, expected ~200ms timeout", elapsed)
+	}
+}
+
+func TestLockVaultInvalidTimeoutFallsBackToDefault(t *testing.T) {
+	t.Setenv("VLT_LOCK_TIMEOUT", "not-a-duration")
+	d, bounded := lockTimeout()
+	if !bounded || d != defaultLockTimeout {
+		t.Errorf("got (%v, %v), want (%v, true)", d, bounded, defaultLockTimeout)
+	}
+}
+
+func TestLockVaultZeroTimeoutMeansUnbounded(t *testing.T) {
+	t.Setenv("VLT_LOCK_TIMEOUT", "0")
+	_, bounded := lockTimeout()
+	if bounded {
+		t.Error("VLT_LOCK_TIMEOUT=0 should disable the timeout")
+	}
+}

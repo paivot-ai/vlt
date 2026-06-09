@@ -15,6 +15,7 @@ type Vault struct {
 	dir      string
 	registry *Registry
 	mu       sync.RWMutex
+	idxState indexedVault
 }
 
 // Open opens a vault at the given directory path, validating that it exists.
@@ -61,8 +62,8 @@ type vaultEntry struct {
 // If name looks like an absolute path, it's used directly.
 // Otherwise, it's looked up by directory basename in the Obsidian config.
 func resolveVault(name string) (string, error) {
-	// Direct absolute path
-	if strings.HasPrefix(name, "/") {
+	// Direct absolute path (filepath.IsAbs handles both /unix and C:\windows forms)
+	if filepath.IsAbs(name) {
 		return validateVaultDir(name)
 	}
 	// Home-relative path
@@ -92,6 +93,11 @@ func resolveVault(name string) (string, error) {
 
 	path, ok := vaults[name]
 	if !ok {
+		// Fall back to VLT_VAULT_PATH when the name is not in the config
+		// (not only when the config itself is unreadable).
+		if p := os.Getenv("VLT_VAULT_PATH"); p != "" {
+			return validateVaultDir(p)
+		}
 		available := make([]string, 0, len(vaults))
 		for k := range vaults {
 			available = append(available, k)
@@ -141,6 +147,8 @@ func safePath(vaultDir, userPath string) (string, error) {
 
 // DiscoverVaults reads the Obsidian config file and returns a map of
 // vault name (directory basename) to absolute path.
+// When two vaults share a basename, the most recently used one (highest
+// Obsidian timestamp) wins, deterministically, instead of map iteration order.
 func DiscoverVaults() (map[string]string, error) {
 	configPath := obsidianConfigPath()
 
@@ -155,8 +163,13 @@ func DiscoverVaults() (map[string]string, error) {
 	}
 
 	vaults := make(map[string]string, len(config.Vaults))
+	newest := make(map[string]int64, len(config.Vaults))
 	for _, entry := range config.Vaults {
 		name := filepath.Base(entry.Path)
+		if prev, ok := newest[name]; ok && prev >= entry.TS {
+			continue
+		}
+		newest[name] = entry.TS
 		vaults[name] = entry.Path
 	}
 
@@ -189,65 +202,10 @@ func skipHiddenDir(path string, d os.DirEntry, walkRoot string) bool {
 	return strings.HasPrefix(name, ".") || name == ".trash"
 }
 
-// resolveNote finds a note by title within the vault.
-// First pass: exact filename match (<title>.md).
-// Second pass (if needed): checks frontmatter aliases.
-// Skips hidden dirs and .trash.
+// resolveNote finds a note by title within the vault using the vault index.
+// Kept as a package-level helper for callers that construct a Vault directly;
+// resolution order is documented on Vault.resolve.
 func resolveNote(vaultDir, title string) (string, error) {
-	target := title + ".md"
-	var found string
-
-	// First pass: exact filename match (fast, no file reads)
-	filepath.WalkDir(vaultDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if skipHiddenDir(path, d, vaultDir) {
-			return filepath.SkipDir
-		}
-		if !d.IsDir() && d.Name() == target {
-			found = path
-			return filepath.SkipAll
-		}
-		return nil
-	})
-
-	if found != "" {
-		return found, nil
-	}
-
-	// Second pass: check frontmatter aliases
-	filepath.WalkDir(vaultDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		if skipHiddenDir(path, d, vaultDir) {
-			return filepath.SkipDir
-		}
-		if d.IsDir() || !strings.HasSuffix(d.Name(), ".md") {
-			return nil
-		}
-
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return nil
-		}
-
-		yaml, _, hasFM := ExtractFrontmatter(string(data))
-		if hasFM {
-			for _, alias := range FrontmatterGetList(yaml, "aliases") {
-				if strings.EqualFold(alias, title) {
-					found = path
-					return filepath.SkipAll
-				}
-			}
-		}
-		return nil
-	})
-
-	if found != "" {
-		return found, nil
-	}
-
-	return "", fmt.Errorf("note %q not found in vault", title)
+	v := &Vault{dir: vaultDir}
+	return v.resolve(title)
 }

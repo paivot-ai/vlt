@@ -77,7 +77,10 @@ func TestParseArgs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmd, params, flags := parseArgs(tt.args)
+			cmd, params, flags, err := parseArgs(tt.args)
+			if err != nil {
+				t.Fatalf("parseArgs: %v", err)
+			}
 
 			if cmd != tt.wantCmd {
 				t.Errorf("cmd = %q, want %q", cmd, tt.wantCmd)
@@ -120,13 +123,16 @@ func TestDispatchPatchLineRangeDeleteKeepsSurroundingContent(t *testing.T) {
 		t.Fatalf("open vault: %v", err)
 	}
 
-	cmd, params, flags := parseArgs([]string{
+	cmd, params, flags, err := parseArgs([]string{
 		"vault=" + dir,
 		"patch",
 		"file=Range",
 		"line=2-4",
 		"delete",
 	})
+	if err != nil {
+		t.Fatalf("parseArgs: %v", err)
+	}
 	if cmd != "patch" {
 		t.Fatalf("cmd = %q, want patch; parseArgs must not treat delete as the top-level command", cmd)
 	}
@@ -243,5 +249,56 @@ func TestDispatchCreateAcceptsFrontmatterOnly(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(dir, "FMOnly.md"))
 	if !strings.Contains(string(data), "type: note") {
 		t.Error("frontmatter not written")
+	}
+}
+
+// -----------------------------------------------------------------
+// Regression tests from the 2026-06-09 full review.
+// -----------------------------------------------------------------
+
+func TestParseArgsRejectsUnknownFlags(t *testing.T) {
+	cases := []struct {
+		args     []string
+		wantHint string
+	}{
+		{[]string{"vault=x", "delete", "file=y", "permanant"}, "permanent"},
+		{[]string{"vault=x", "patch", "file=y", "delette"}, "delete"},
+		{[]string{"vault=x", "raed", "file=y"}, "read"},
+	}
+
+	for _, tc := range cases {
+		_, _, _, err := parseArgs(tc.args)
+		if err == nil {
+			t.Errorf("parseArgs(%v): expected error for unknown word, got nil", tc.args)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.wantHint) {
+			t.Errorf("parseArgs(%v) error %q missing suggestion %q", tc.args, err, tc.wantHint)
+		}
+	}
+}
+
+func TestParseArgsAcceptsAllKnownFlags(t *testing.T) {
+	for flag := range knownFlags {
+		if _, _, _, err := parseArgs([]string{"read", "file=x", flag}); err != nil {
+			t.Errorf("known flag %q rejected: %v", flag, err)
+		}
+	}
+}
+
+func TestStripQuotePairRemovesExactlyOnePair(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`"hello"`, "hello"},
+		{`'hello'`, "hello"},
+		{`""hello""`, `"hello"`}, // only one pair stripped
+		{`"mismatched'`, `"mismatched'`},
+		{`plain`, `plain`},
+		{`"`, `"`},
+		{``, ``},
+	}
+	for _, tc := range cases {
+		if got := stripQuotePair(tc.in); got != tc.want {
+			t.Errorf("stripQuotePair(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 }

@@ -156,5 +156,6 @@ func (v *Vault) TemplatesApply(templateName, noteName, notePath string) error {
 		return err
 	}
 	v.registry.register(v.dir, fullPath, contentBytes)
+	v.invalidateIndex()
 	return nil
 }

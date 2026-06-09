@@ -152,7 +152,7 @@ vlt search query="architecture"
 | `patch file="<title>" heading="<heading>" [content="<text>"] [delete] [timestamps]` | Replace or delete a section by heading |
 | `patch file="<title>" line="<N>" [content="<text>"] [delete] [timestamps]` | Replace or delete a single line |
 | `patch file="<title>" line="<N-M>" [content="<text>"] [delete] [timestamps]` | Replace or delete a line range |
-| `move path="<from>" to="<to>"` | Move/rename note (auto-updates wikilinks and markdown links) |
+| `move path="<from>" to="<to>" [force]` | Move/rename note (auto-updates wikilinks and markdown links; refuses to overwrite an existing destination without `force`) |
 | `delete file="<title>" [permanent]` | Move to .trash (or hard-delete) |
 | `files [folder="<dir>"] [ext="<ext>"] [total]` | List vault files |
 | `daily [date="YYYY-MM-DD"]` | Create or read daily note |
@@ -256,10 +256,11 @@ vlt vault="~/Documents/vault" ...# by home-relative path
 
 ### Note resolution
 
-Notes are resolved by a two-pass algorithm:
+Notes are resolved through a lazily built per-invocation index (one vault walk, shared by all lookups in the same process):
 
-1. **Fast pass** -- exact filename match (`<title>.md`), no file I/O needed
-2. **Alias pass** -- if no filename match, scan frontmatter `aliases` for a case-insensitive match
+1. **Path pass** -- if the title contains a `/`, it is tried as a vault-relative path (`sub/Note` or `sub/Note.md`)
+2. **Fast pass** -- exact filename match (`<title>.md`), no file I/O needed
+3. **Alias pass** -- if no filename match, scan frontmatter `aliases` for a case-insensitive match (the alias map is only built when a lookup misses)
 
 This means you can reference notes by their aliases just like in Obsidian:
 
@@ -280,6 +281,7 @@ vlt understands all standard Obsidian wikilink formats:
 | Format | Example |
 |--------|---------|
 | Simple link | `[[Note Title]]` |
+| Path-form link | `[[folder/Note Title]]` |
 | Link to heading | `[[Note Title#Section]]` |
 | Block reference | `[[Note Title#^block-id]]` |
 | Display text | `[[Note Title\|Custom Text]]` |
@@ -298,7 +300,7 @@ vlt vault="MyVault" move path="drafts/Old Name.md" to="published/New Name.md"
 # updated [...](drafts/Old Name.md) -> [...](published/New Name.md) in 3 file(s)
 ```
 
-Link updates preserve headings, block references, display text, and embed prefixes. Markdown links have their relative paths recomputed correctly. If only the folder changes (same filename), wikilink updates are skipped since Obsidian resolves by title regardless of path, but markdown links are always updated since they use paths.
+Link updates preserve headings, block references, display text, and embed prefixes. Markdown links have their relative paths recomputed correctly. Title-form wikilinks (`[[Note]]`) are updated on rename; path-form wikilinks (`[[folder/Note]]`) are updated on every move, including folder-only moves. Moving onto an existing file is refused unless `force` is passed.
 
 ### Content manipulation
 
@@ -660,11 +662,11 @@ _ = vault.Append("Daily Log", "New entry", false)
 
 - **Zero dependencies** -- The `go.mod` has no `require` lines. This eliminates supply chain risk and keeps the binary small and fast to compile.
 - **Direct filesystem access** -- All operations read and write files directly. No database, no index, no daemon.
-- **Two-pass note resolution** -- Filename match first (no I/O), then alias scan (reads frontmatter). Fast for the common case, correct for the edge case.
+- **Indexed note resolution** -- A lazy per-invocation index maps filenames, vault-relative paths, attachments, and aliases to locations in a single walk. Filename lookups need no file I/O; the alias map is built only when a lookup misses. The index is invalidated after every mutation.
 - **Case-insensitive link matching** -- Mirrors Obsidian's behavior. `[[my note]]` resolves to `My Note.md`.
 - **Simple frontmatter parsing** -- String-based YAML parsing handles Obsidian's common patterns (key-value, inline lists, block lists) without pulling in a full YAML library.
 - **Inert zone masking** -- Before scanning for links, tags, or references, content inside code blocks, comments, and math expressions is masked out to prevent false positives. Each pass preserves byte offsets and line numbers so that all downstream operations remain position-accurate.
-- **Vault-level advisory locking** -- Multiple vlt processes can safely operate on the same vault concurrently. Write commands (`create`, `append`, `move`, etc.) acquire an exclusive `flock(2)` lock. Read commands are lock-free by default so they never block behind a writer; pass `--strict-flock` when you want reads to acquire a shared lock. The lock is kernel-managed via `.vlt.lock` in the vault root, so it auto-releases on process crash or kill -- no stale lock cleanup needed.
+- **Vault-level advisory locking** -- Multiple vlt processes can safely operate on the same vault concurrently. Write commands (`create`, `append`, `move`, etc.) acquire an exclusive `flock(2)` lock. Read commands are lock-free by default so they never block behind a writer; pass `--strict-flock` when you want reads to acquire a shared lock. The lock is kernel-managed via `.vlt.lock` in the vault root, so it auto-releases on process crash or kill -- no stale lock cleanup needed. Lock acquisition times out after 10 seconds instead of waiting forever on a wedged holder; tune with `VLT_LOCK_TIMEOUT` (a Go duration like `30s`, or `0` to wait forever).
 - **File integrity registry** -- Every write path registers a SHA-256 content hash in `~/.vlt/registries/<vault-id>/registry.json`. On read, the hash is verified and an `IntegrityStatus` (OK, Untracked, Mismatch, NoRegistry) is returned. This detects modifications made outside vlt without blocking them.
 - **Path traversal protection** -- All user-supplied paths are validated by `safePath()`, which rejects absolute paths, `..` traversals, and any result resolving outside the vault root. This prevents directory escape attacks in agentic workflows where file paths may come from untrusted input.
 - **Relative vault paths** -- In addition to vault names and absolute paths, vlt supports relative paths (e.g., `.vault/knowledge`) for vault resolution, aligning with embedded vault patterns used by plugins.
@@ -673,9 +675,9 @@ _ = vault.Append("Daily Log", "New entry", false)
 
 | Metric | Value |
 |--------|-------|
-| Lines of code | ~5,500 (source) |
-| Lines of tests | ~10,900 |
-| Test functions | 344 |
+| Lines of code | ~6,300 (source) |
+| Lines of tests | ~12,100 |
+| Test functions | 398 |
 | Test coverage | 84% |
 | External dependencies | 0 |
 | Go version | 1.24+ |
@@ -738,7 +740,26 @@ When demand warrants it, we plan to integrate [tantivy](https://github.com/quick
 
 This will be an opt-in feature -- the zero-dependency linear scan remains the default for simplicity. If this matters to you, open an issue or upvote an existing one.
 
-### Recently shipped (v0.10.2)
+### Recently shipped (v0.11.0)
+
+A full-codebase reliability review with every confirmed bug fixed and regression-tested:
+
+- **`move` no longer overwrites silently** -- moving onto an existing file fails with `destination already exists`; pass `force` (CLI) or use `MoveForce` (library) to overwrite. Previously the destination was destroyed without warning.
+- **Trash collisions preserved** -- deleting a second note with the same basename gets an Obsidian-style numeric suffix (`Note 1.md`) instead of destroying the previously trashed copy.
+- **`append` is atomic** -- rewritten as read-concatenate-rename, closing the last torn-read window for lock-free readers. A separating newline is inserted when the file lacks a trailing one.
+- **Path-form wikilinks** -- `[[folder/Note]]` now resolves everywhere: `read file="sub/Note"`, `backlinks`, `links`, `orphans`, `unresolved`, and `move` rewrites path-form links on every move (including folder-only moves). Attachment embeds (`![[photo.png]]`) resolve too, instead of being reported as broken.
+- **Lazy vault index** -- note resolution walks the vault once per invocation instead of once per lookup; `links` and `read follow` drop from O(links x vault) to a single walk. `integrity:baseline` flushes the registry once instead of per file.
+- **Top-level frontmatter keys only** -- search filters (`[type:x]`), `property:set`, and value extraction no longer falsely match keys nested under another mapping (e.g. `metadata: type:`). `property:set` rejects values and names that would corrupt the frontmatter block.
+- **Integrity hardening** -- the registry is reloaded after the vault lock is acquired (closing a lost-update race between concurrent writers); registry corruption and flush failures now warn on stderr instead of silently disabling tamper detection.
+- **Lock timeouts** -- lock acquisition polls non-blocking and fails after 10s instead of hanging forever behind a wedged process; tune with `VLT_LOCK_TIMEOUT` (`30s`, or `0` to wait forever).
+- **Strict CLI parsing** -- unknown bare-word flags are rejected with a "did you mean" suggestion instead of silently ignored (a typo'd `permanent` previously changed delete behaviour without any signal). Quote stripping removes exactly one matching pair.
+- **Inline math no longer swallows prose** -- a span whose closing `$` is followed by a digit is not treated as math (Pandoc's rule), so `paid $50 for [[Server]] and $20` keeps its wikilink and backlink.
+- **Output consistency** -- `--json` always emits `[]` for empty results (never `null`); `tasks --csv` uses real CSV escaping; `properties --json` preserves block lists and one-level nested mappings as structured values; folder-only `move` output shows the path-form link rewrite.
+- **Smaller fixes** -- `create` with `silent` still reports "note already exists" on stderr; `prepend`/`write` guarantee newline separation; bookmarks are written atomically; Windows absolute vault paths (`C:\...`) resolve; duplicate vault basenames resolve to the most recently used vault; `VLT_VAULT_PATH` is consulted when a vault name is not found (not only when the config is unreadable); Moment `[literal]` escapes and the `dd` token translate correctly.
+
+Behaviour changes to note when upgrading: `move` onto an existing file now errors (was: silent overwrite), unknown flags now error (was: ignored), and `append`/`write` normalize trailing newlines.
+
+### Previously shipped (v0.10.2)
 
 - **Atomic writes** -- every note rewrite now goes through a temp-file-plus-rename, so a lock-free reader always sees the complete old or complete new file, never a truncated intermediate state. Fixes a torn-read race surfaced by concurrent read-during-write.
 
