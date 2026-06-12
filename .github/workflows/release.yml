@@ -9,8 +9,32 @@ permissions:
   contents: write
 
 jobs:
+  verify-skill-version:
+    name: Verify skill version matches tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Assert SKILL.md version equals release tag
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          skill_version="$(awk '/^version:/ {print $2; exit}' docs/vlt-skill/SKILL.md)"
+          if [ -z "$skill_version" ]; then
+            echo "ERROR: no 'version:' frontmatter found in docs/vlt-skill/SKILL.md" >&2
+            exit 1
+          fi
+          if [ "$skill_version" != "$tag_version" ]; then
+            echo "ERROR: skill version mismatch." >&2
+            echo "  docs/vlt-skill/SKILL.md version: $skill_version" >&2
+            echo "  release tag version:             $tag_version (from $GITHUB_REF_NAME)" >&2
+            echo "Run 'make bump v=$tag_version', commit, and re-tag." >&2
+            exit 1
+          fi
+          echo "OK: SKILL.md version $skill_version matches tag $GITHUB_REF_NAME"
+
   release:
     name: Release
+    needs: verify-skill-version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
